@@ -1,0 +1,8 @@
+@import "tailwindcss";
+
+/* Leaflet overrides */
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  background: #0f172a;
+}
