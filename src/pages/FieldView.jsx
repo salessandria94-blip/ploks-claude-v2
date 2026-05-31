@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 're
 import { Navigation, CheckCircle, MapPin, X, RefreshCw, Layers } from 'lucide-react'
 
 const MAP_STYLES = [
-  { id: 'streets', label: 'Light', url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap' },
+  { id: 'streets', label: 'Light', url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', attribution: '© CartoDB' },
   { id: 'dark', label: 'Dark', url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attribution: '© CartoDB' },
   { id: 'satellite', label: 'Satellite', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: '© ESRI' },
 ]
@@ -177,10 +177,18 @@ export default function FieldView() {
   function startGps() {
     if (!navigator.geolocation) return
     setGpsRequested(true)
-    watchRef.current = navigator.geolocation.watchPosition(
-      pos => setRepPos([pos.coords.latitude, pos.coords.longitude]),
-      err => console.warn('GPS error', err),
-      { enableHighAccuracy: true, maximumAge: 5000 }
+    // getCurrentPosition fires the iOS permission prompt; watchPosition alone often won't
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setRepPos([pos.coords.latitude, pos.coords.longitude])
+        watchRef.current = navigator.geolocation.watchPosition(
+          p => setRepPos([p.coords.latitude, p.coords.longitude]),
+          err => console.warn('GPS watch error', err),
+          { enableHighAccuracy: true, maximumAge: 5000 }
+        )
+      },
+      err => console.warn('GPS denied', err),
+      { enableHighAccuracy: true }
     )
   }
 
