@@ -38,6 +38,15 @@ function RepDot({ position }) {
 
 function LocationButton({ position, onEnableGps }) {
   const map = useMap()
+  const snappedRef = useRef(false)
+
+  useEffect(() => {
+    if (position && !snappedRef.current) {
+      snappedRef.current = true
+      map.setView(position, 17)
+    }
+  }, [position])
+
   function handlePress() {
     if (position) {
       map.setView(position, 17)
