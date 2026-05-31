@@ -45,8 +45,12 @@ export async function logActivity(entry) {
   return call('logActivity', entry)
 }
 
-export async function getAllLeads(filters = {}) {
-  return call('getAllLeads', filters)
+export async function getAllLeads(zip, filters = {}) {
+  return call('getAllLeads', { zip, ...filters })
+}
+
+export async function getZipList() {
+  return call('getZipList', {})
 }
 
 export async function getAllReps() {
