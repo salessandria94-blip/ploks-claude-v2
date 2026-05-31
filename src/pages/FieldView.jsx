@@ -36,16 +36,22 @@ function RepDot({ position }) {
   return <Marker position={position} icon={repIcon} zIndexOffset={1000} />
 }
 
-function RecenterControl({ position }) {
+function LocationButton({ position, onEnableGps }) {
   const map = useMap()
-  if (!position) return null
+  function handlePress() {
+    if (position) {
+      map.setView(position, 17)
+    } else {
+      onEnableGps()
+    }
+  }
   return (
     <button
-      onClick={() => map.setView(position, 17)}
-      className="absolute top-3 right-3 z-[999] bg-slate-900/90 border border-slate-700 text-white rounded-lg p-2 shadow-lg"
-      title="Center on my location"
+      onClick={handlePress}
+      className="absolute top-3 right-3 z-[999] bg-slate-900/90 border border-slate-700 rounded-lg p-2 shadow-lg"
+      title={position ? 'Center on my location' : 'Enable location'}
     >
-      <Navigation size={16} className="text-blue-400" />
+      <Navigation size={16} className={position ? 'text-green-400' : 'text-slate-400'} />
     </button>
   )
 }
@@ -165,12 +171,10 @@ export default function FieldView() {
   const [selectedLead, setSelectedLead] = useState(null)
   const [claiming, setClaiming] = useState(false)
   const [tab, setTab] = useState('map')
-  const [gpsRequested, setGpsRequested] = useState(false)
   const watchRef = useRef(null)
 
   function startGps() {
     if (!navigator.geolocation) return
-    setGpsRequested(true)
     // getCurrentPosition fires the iOS permission prompt; watchPosition alone often won't
     navigator.geolocation.getCurrentPosition(
       pos => {
@@ -262,12 +266,6 @@ export default function FieldView() {
           <button onClick={() => loadLeads(rep)} disabled={loadingLeads} className="text-slate-500 hover:text-slate-300">
             <RefreshCw size={15} className={loadingLeads ? 'animate-spin text-blue-400' : ''} />
           </button>
-          {repPos
-            ? <span className="text-xs text-green-400">● GPS</span>
-            : gpsRequested
-              ? <span className="text-xs text-slate-500">○ GPS</span>
-              : <button onClick={startGps} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded-lg font-medium">Enable Location</button>
-          }
         </div>
       </div>
 
@@ -282,7 +280,7 @@ export default function FieldView() {
           >
             <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
             <RepDot position={repPos} />
-            <RecenterControl position={repPos} />
+            <LocationButton position={repPos} onEnableGps={startGps} />
             <MapClickCapture onMapClick={() => setSelectedLead(null)} />
             {availableLeads.map(lead => (
               <Marker key={lead.id} position={[lead.lat, lead.lng]} icon={leadIcon('#3b82f6')}
