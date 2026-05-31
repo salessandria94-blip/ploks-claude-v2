@@ -60,3 +60,15 @@ export async function getAllReps() {
 export async function assignLead(leadId, repId, repName) {
   return call('assignLead', { leadId, repId, repName })
 }
+
+export async function unassignLead(leadId) {
+  return call('unassignLead', { leadId })
+}
+
+export async function updateLeadProfile(leadId, fields) {
+  return call('updateLeadProfile', { leadId, fields })
+}
+
+export async function getZipList() {
+  return call('getZipList', {})
+}
