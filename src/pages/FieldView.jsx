@@ -1,13 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
-import { Navigation, CheckCircle, MapPin, X, RefreshCw, Layers } from 'lucide-react'
+import { Navigation, CheckCircle, MapPin, X, RefreshCw } from 'lucide-react'
 
-const MAP_STYLES = [
-  { id: 'streets', label: 'Light', url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', attribution: '© CartoDB' },
-  { id: 'dark', label: 'Dark', url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attribution: '© CartoDB' },
-  { id: 'satellite', label: 'Satellite', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: '© ESRI' },
-]
+const SATELLITE_TILE = { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: '© ESRI' }
 import L from 'leaflet'
 import { validatePin, getLeadsForRep, claimLead, updateLeadStatus } from '../api/sheets.js'
 
@@ -40,16 +36,16 @@ function RepDot({ position }) {
   return <Marker position={position} icon={repIcon} zIndexOffset={1000} />
 }
 
-function RecenterButton({ position }) {
+function RecenterControl({ position }) {
   const map = useMap()
   if (!position) return null
   return (
     <button
       onClick={() => map.setView(position, 17)}
-      className="absolute bottom-36 right-3 z-[999] bg-slate-800 border border-slate-600 text-white rounded-full p-2 shadow-lg"
+      className="absolute top-3 right-3 z-[999] bg-slate-900/90 border border-slate-700 text-white rounded-lg p-2 shadow-lg"
       title="Center on my location"
     >
-      <Navigation size={18} className="text-blue-400" />
+      <Navigation size={16} className="text-blue-400" />
     </button>
   )
 }
@@ -169,8 +165,6 @@ export default function FieldView() {
   const [selectedLead, setSelectedLead] = useState(null)
   const [claiming, setClaiming] = useState(false)
   const [tab, setTab] = useState('map')
-  const [mapStyle, setMapStyle] = useState('streets')
-  const [showStylePicker, setShowStylePicker] = useState(false)
   const [gpsRequested, setGpsRequested] = useState(false)
   const watchRef = useRef(null)
 
@@ -280,36 +274,15 @@ export default function FieldView() {
       {/* Map tab */}
       {tab === 'map' && (
         <div className="relative flex-1 min-h-0">
-          {/* Map style picker */}
-          {showStylePicker && (
-            <div className="absolute top-12 right-3 z-[1000] bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl">
-              {MAP_STYLES.map(s => (
-                <button
-                  key={s.id}
-                  onClick={() => { setMapStyle(s.id); setShowStylePicker(false) }}
-                  className={`flex items-center gap-2 w-full px-4 py-3 text-sm transition-colors ${mapStyle === s.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}
-                >
-                  {mapStyle === s.id && <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />}
-                  {mapStyle !== s.id && <span className="w-1.5 h-1.5 rounded-full bg-slate-600 inline-block" />}
-                  {s.label}
-                </button>
-              ))}
-            </div>
-          )}
-
           <MapContainer
             center={repPos || JACKSONVILLE_CENTER}
             zoom={14}
             style={{ height: '100%', width: '100%' }}
             zoomControl={false}
           >
-            <TileLayer
-              key={mapStyle}
-              url={MAP_STYLES.find(s => s.id === mapStyle).url}
-              attribution={MAP_STYLES.find(s => s.id === mapStyle).attribution}
-            />
+            <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
             <RepDot position={repPos} />
-            <RecenterButton position={repPos} />
+            <RecenterControl position={repPos} />
             <MapClickCapture onMapClick={() => setSelectedLead(null)} />
             {availableLeads.map(lead => (
               <Marker key={lead.id} position={[lead.lat, lead.lng]} icon={leadIcon('#3b82f6')}
@@ -324,14 +297,6 @@ export default function FieldView() {
               </Marker>
             ))}
           </MapContainer>
-
-          {/* Map style toggle button */}
-          <button
-            onClick={() => setShowStylePicker(p => !p)}
-            className="absolute top-3 right-3 z-[999] bg-slate-900/90 border border-slate-700 text-slate-300 rounded-lg p-2 shadow-lg"
-          >
-            <Layers size={16} />
-          </button>
 
           <div className="absolute top-3 left-3 z-[999] bg-slate-900/90 rounded-lg px-3 py-2 text-xs text-slate-300 space-y-1 pointer-events-none">
             <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-blue-500 inline-block" /> Available</div>
