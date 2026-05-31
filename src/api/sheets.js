@@ -44,3 +44,15 @@ export async function updateLeadStatus(leadId, status, notes) {
 export async function logActivity(entry) {
   return call('logActivity', entry)
 }
+
+export async function getAllLeads(filters = {}) {
+  return call('getAllLeads', filters)
+}
+
+export async function getAllReps() {
+  return call('getAllReps', {})
+}
+
+export async function assignLead(leadId, repId, repName) {
+  return call('assignLead', { leadId, repId, repName })
+}
