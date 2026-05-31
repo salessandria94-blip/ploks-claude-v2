@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 're
 import { Navigation, CheckCircle, MapPin, X, RefreshCw, Layers } from 'lucide-react'
 
 const MAP_STYLES = [
-  { id: 'streets', label: 'Streets', url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap' },
+  { id: 'streets', label: 'Light', url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', attribution: '© OpenStreetMap' },
   { id: 'dark', label: 'Dark', url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', attribution: '© CartoDB' },
   { id: 'satellite', label: 'Satellite', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: '© ESRI' },
 ]
@@ -171,19 +171,22 @@ export default function FieldView() {
   const [tab, setTab] = useState('map')
   const [mapStyle, setMapStyle] = useState('streets')
   const [showStylePicker, setShowStylePicker] = useState(false)
+  const [gpsRequested, setGpsRequested] = useState(false)
   const watchRef = useRef(null)
 
-  // Start GPS after unlock
-  useEffect(() => {
-    if (!rep) return
+  function startGps() {
     if (!navigator.geolocation) return
+    setGpsRequested(true)
     watchRef.current = navigator.geolocation.watchPosition(
       pos => setRepPos([pos.coords.latitude, pos.coords.longitude]),
       err => console.warn('GPS error', err),
       { enableHighAccuracy: true, maximumAge: 5000 }
     )
-    return () => navigator.geolocation.clearWatch(watchRef.current)
-  }, [rep])
+  }
+
+  useEffect(() => {
+    return () => { if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current) }
+  }, [])
 
   // Load leads after unlock
   async function loadLeads(repData) {
@@ -200,14 +203,6 @@ export default function FieldView() {
 
   function handleUnlock(repData) {
     setRep(repData)
-    // Request GPS immediately after PIN accepted
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        pos => setRepPos([pos.coords.latitude, pos.coords.longitude]),
-        err => console.warn('GPS denied or unavailable', err),
-        { enableHighAccuracy: true }
-      )
-    }
     loadLeads(repData)
   }
 
@@ -265,7 +260,12 @@ export default function FieldView() {
           <button onClick={() => loadLeads(rep)} disabled={loadingLeads} className="text-slate-500 hover:text-slate-300">
             <RefreshCw size={15} className={loadingLeads ? 'animate-spin text-blue-400' : ''} />
           </button>
-          <span className="text-xs">{repPos ? <span className="text-green-400">● GPS</span> : <span className="text-slate-600">○ GPS</span>}</span>
+          {repPos
+            ? <span className="text-xs text-green-400">● GPS</span>
+            : gpsRequested
+              ? <span className="text-xs text-slate-500">○ GPS</span>
+              : <button onClick={startGps} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded-lg font-medium">Enable Location</button>
+          }
         </div>
       </div>
 
@@ -336,13 +336,6 @@ export default function FieldView() {
             </div>
           )}
 
-          {!loadingLeads && leads.length === 0 && (
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-[999] bg-slate-900/95 rounded-xl px-5 py-4 text-center pointer-events-none">
-              <MapPin size={24} className="text-slate-500 mx-auto mb-2" />
-              <div className="text-slate-300 text-sm font-medium">No leads assigned yet</div>
-              <div className="text-slate-500 text-xs mt-1">Check back after your admin assigns leads</div>
-            </div>
-          )}
 
           <LeadCard
             lead={selectedLead}
