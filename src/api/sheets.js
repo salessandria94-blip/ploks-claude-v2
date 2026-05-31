@@ -6,13 +6,16 @@ const API_SECRET = import.meta.env.VITE_API_SECRET
 
 async function call(action, payload = {}) {
   if (!API_URL) throw new Error('VITE_APPS_SCRIPT_URL not set')
-  const res = await fetch(API_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, secret: API_SECRET, ...payload }),
+  // Apps Script drops POST bodies on redirect — use GET with encoded params instead
+  const params = new URLSearchParams({
+    action,
+    secret: API_SECRET,
+    data: JSON.stringify(payload),
   })
+  const res = await fetch(`${API_URL}?${params.toString()}`, { redirect: 'follow' })
   if (!res.ok) throw new Error(`API error ${res.status}`)
-  const data = await res.json()
+  const text = await res.text()
+  const data = JSON.parse(text)
   if (data.error) throw new Error(data.error)
   return data
 }
