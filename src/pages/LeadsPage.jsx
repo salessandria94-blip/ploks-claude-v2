@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, Fragment } from 'react'
 import { getAllLeads, getZipList, getAllReps, assignLead, unassignLead, updateLeadProfile } from '../api/sheets.js'
 import { RefreshCw, ChevronDown, MapPin, ChevronRight } from 'lucide-react'
 
@@ -360,9 +360,8 @@ export default function LeadsPage() {
               {filtered.map(lead => {
                 const isExpanded = expandedId === lead.id
                 return (
-                  <>
+                  <Fragment key={lead.id}>
                     <tr
-                      key={lead.id}
                       onClick={() => setExpandedId(isExpanded ? null : lead.id)}
                       className={`border-b border-slate-800/60 cursor-pointer transition-colors ${isExpanded ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'}`}
                     >
@@ -394,14 +393,13 @@ export default function LeadsPage() {
                     </tr>
                     {isExpanded && (
                       <LeadProfile
-                        key={`profile-${lead.id}`}
                         lead={lead}
                         reps={reps}
                         onClose={() => setExpandedId(null)}
                         onLeadUpdate={handleLeadUpdate}
                       />
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>
