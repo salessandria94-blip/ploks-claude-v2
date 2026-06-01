@@ -9,6 +9,7 @@ import {
 import {
   validatePin, getAllReps, getZipList, getAllLeads, claimLead, unassignLead,
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
+  claimLeadsBulk, unassignLeadsBulk,
 } from '../api/sheets.js'
 import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList } from 'lucide-react'
 
@@ -138,7 +139,6 @@ function RepMap({ rep, active }) {
   const [tool, setTool] = useState(null)
   const [busy, setBusy] = useState(null)
   const [bulkBusy, setBulkBusy] = useState(false)
-  const [bulkProgress, setBulkProgress] = useState([0, 0])
 
   useEffect(() => { getZipList().then(r => setZips(r.zips || [])).catch(() => {}) }, [])
   useEffect(() => { getAllReps().then(r => setReps(r.reps || [])).catch(() => {}) }, [])
@@ -209,31 +209,28 @@ function RepMap({ rep, active }) {
   }
 
   async function bulkClaim(targets) {
-    setBulkBusy(true); setError(''); setBulkProgress([0, targets.length])
-    let done = 0, ok = 0
-    await Promise.allSettled(targets.map(async lead => {
-      try {
-        await claimLead(lead.id, rep.id, rep.name, null, lead.zip)
-        patchLead(lead.id, { assigned_rep: rep.name, assigned_rep_id: rep.id, status: lead.status || 'No Contact' })
-        ok++
-      } finally { done++; setBulkProgress([done, targets.length]) }
-    }))
-    setBulkBusy(false)
-    const failed = targets.length - ok
-    if (failed > 0) setError(`${ok} claimed, ${failed} failed (cap reached or already taken).`)
-    setSelectedLeads([])
+    setBulkBusy(true); setError('')
+    try {
+      const res = await claimLeadsBulk(targets.map(l => l.id), rep.id, rep.name, selectedZip)
+      const claimed = new Set(res.claimed || [])
+      setLeads(prev => prev.map(l => (claimed.has(l.id)
+        ? { ...l, assigned_rep: rep.name, assigned_rep_id: rep.id, status: l.status || 'No Contact' }
+        : l)))
+      const failed = targets.length - claimed.size
+      if (failed > 0) setError(`${claimed.size} claimed, ${failed} skipped (already taken or cap).`)
+    } catch (err) { setError(err.message) }
+    finally { setBulkBusy(false); setSelectedLeads([]) }
   }
   async function bulkRelease(targets) {
-    setBulkBusy(true); setError(''); setBulkProgress([0, targets.length])
-    let done = 0
-    await Promise.allSettled(targets.map(async lead => {
-      try {
-        await unassignLead(lead.id)
-        patchLead(lead.id, { assigned_rep: '', assigned_rep_id: '', status: '' })
-      } finally { done++; setBulkProgress([done, targets.length]) }
-    }))
-    setBulkBusy(false)
-    setSelectedLeads([])
+    setBulkBusy(true); setError('')
+    try {
+      const res = await unassignLeadsBulk(targets.map(l => l.id), rep.id, selectedZip)
+      const released = new Set(res.released || [])
+      setLeads(prev => prev.map(l => (released.has(l.id)
+        ? { ...l, assigned_rep: '', assigned_rep_id: '', status: '' }
+        : l)))
+    } catch (err) { setError(err.message) }
+    finally { setBulkBusy(false); setSelectedLeads([]) }
   }
 
   const mineCount = geoLeads.filter(l => relationOf(l, rep.id) === 'mine').length
@@ -331,13 +328,13 @@ function RepMap({ rep, active }) {
               {selOpen.length > 0 && (
                 <button onClick={() => bulkClaim(selOpen)} disabled={bulkBusy}
                   className="flex-1 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm py-2.5 rounded-lg font-semibold">
-                  {bulkBusy ? `${bulkProgress[0]}/${bulkProgress[1]}…` : `Claim ${selOpen.length} open`}
+                  {bulkBusy ? 'Claiming…' : `Claim ${selOpen.length} open`}
                 </button>
               )}
               {selMine.length > 0 && (
                 <button onClick={() => bulkRelease(selMine)} disabled={bulkBusy}
                   className="flex-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm py-2.5 rounded-lg font-semibold">
-                  {bulkBusy ? `${bulkProgress[0]}/${bulkProgress[1]}…` : `Release ${selMine.length} mine`}
+                  {bulkBusy ? 'Releasing…' : `Release ${selMine.length} mine`}
                 </button>
               )}
             </div>
