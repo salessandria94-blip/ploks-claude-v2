@@ -4,7 +4,7 @@
 const API_URL = import.meta.env.VITE_APPS_SCRIPT_URL
 const API_SECRET = import.meta.env.VITE_API_SECRET
 
-async function call(action, payload = {}) {
+async function call(action, payload = {}, attempt = 0) {
   if (!API_URL) throw new Error('VITE_APPS_SCRIPT_URL not set')
   // Apps Script drops POST bodies on redirect — use GET with encoded params instead
   const params = new URLSearchParams({
@@ -12,12 +12,30 @@ async function call(action, payload = {}) {
     secret: API_SECRET,
     data: JSON.stringify(payload),
   })
-  const res = await fetch(`${API_URL}?${params.toString()}`, { redirect: 'follow' })
-  if (!res.ok) throw new Error(`API error ${res.status}`)
-  const text = await res.text()
-  const data = JSON.parse(text)
-  if (data.error) throw new Error(data.error)
-  return data
+  // Mobile connections stall silently — without a timeout the request hangs
+  // forever. Abort after 20s and auto-retry once before surfacing an error.
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), 20000)
+  try {
+    const res = await fetch(`${API_URL}?${params.toString()}`, {
+      redirect: 'follow',
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+    if (!res.ok) throw new Error(`API error ${res.status}`)
+    const data = JSON.parse(await res.text())
+    if (data.error) throw new Error(data.error)
+    return data
+  } catch (e) {
+    // Retry once on a stalled/aborted connection (transient on mobile).
+    if ((e.name === 'AbortError' || e.name === 'TypeError') && attempt < 1) {
+      return call(action, payload, attempt + 1)
+    }
+    if (e.name === 'AbortError') throw new Error('Network timed out — try again')
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 export async function validatePin(repSlug, pin) {
