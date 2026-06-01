@@ -1,16 +1,23 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import {
   SATELLITE_TILE, JACKSONVILLE_CENTER, leadIcon, FitBounds, CenterOnLead, ClickToClear, DrawTool,
   COLOR_OPEN, COLOR_OTHERS, COLOR_MINE, COLOR_SELECTED,
 } from '../components/mapTools.jsx'
-import { validatePin, getAllReps, getZipList, getAllLeads, claimLead, unassignLead, updateLeadStatus } from '../api/sheets.js'
-import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2 } from 'lucide-react'
+import {
+  validatePin, getAllReps, getZipList, getAllLeads, claimLead, unassignLead,
+  updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
+} from '../api/sheets.js'
+import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
+const ACTION_LABELS = {
+  admin_assign: 'Assigned', admin_unassign: 'Unassigned', status_update: 'Status',
+  claim: 'Claimed', auto_recycle: 'Recycled', event: 'Event',
+}
 
 function relationOf(lead, repId) {
   if (lead.assigned_rep_id && String(lead.assigned_rep_id) === String(repId)) return 'mine'
@@ -50,8 +57,8 @@ function RepLogin({ lockedSlug, onUnlock }) {
       const res = await validatePin(slug, nextPin)
       if (res.ok) onUnlock(res.rep)
       else { setError('Wrong PIN'); setPin('') }
-    } catch {
-      setError('Connection error'); setPin('')
+    } catch (e) {
+      setError(e.message || 'Connection error'); setPin('')
     } finally { setLoading(false) }
   }
 
@@ -108,8 +115,20 @@ function RepLogin({ lockedSlug, onUnlock }) {
 
 // ── Map tab ─────────────────────────────────────────────────────────────────
 
-function RepMap({ rep }) {
+// Keep the Leaflet canvas correctly sized when the tab is shown or the
+// bottom profile panel opens/closes.
+function MapResizer({ active, panelOpen }) {
+  const map = useMap()
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 160)
+    return () => clearTimeout(t)
+  }, [active, panelOpen, map])
+  return null
+}
+
+function RepMap({ rep, active }) {
   const [zips, setZips] = useState([])
+  const [reps, setReps] = useState([])
   const [selectedZip, setSelectedZip] = useState('')
   const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(false)
@@ -122,9 +141,11 @@ function RepMap({ rep }) {
   const [bulkProgress, setBulkProgress] = useState([0, 0])
 
   useEffect(() => { getZipList().then(r => setZips(r.zips || [])).catch(() => {}) }, [])
+  useEffect(() => { getAllReps().then(r => setReps(r.reps || [])).catch(() => {}) }, [])
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
   const geoLeads = useMemo(() => leads.filter(l => l.lat && l.lng), [leads])
+  const panelOpen = !!selectedLead && selectedLeads.length === 0
 
   async function loadZip(zip) {
     setSelectedZip(zip)
@@ -171,6 +192,19 @@ function RepMap({ rep }) {
     try {
       await updateLeadStatus(lead.id, status, '', rep.id)
       patchLead(lead.id, { status })
+    } catch (err) { alert(err.message) } finally { setBusy(null) }
+  }
+  async function saveProfile(lead, fields) {
+    await updateLeadProfile(lead.id, fields)
+    const { notes, ...rest } = fields // notes are appended server-side; sync on next load
+    patchLead(lead.id, rest)
+  }
+  async function transfer(lead, toRep) {
+    setBusy(lead.id)
+    try {
+      await assignLead(lead.id, toRep.id, toRep.name)
+      patchLead(lead.id, { assigned_rep: toRep.name, assigned_rep_id: toRep.id })
+      setSelectedLead(null)
     } catch (err) { alert(err.message) } finally { setBusy(null) }
   }
 
@@ -235,6 +269,7 @@ function RepMap({ rep }) {
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
           <FitBounds leads={geoLeads} />
           <CenterOnLead lead={selectedLead} />
+          <MapResizer active={active} panelOpen={panelOpen} />
           <ClickToClear enabled={!tool} onClear={() => { setSelectedLead(null); setSelectedLeads([]) }} />
           <DrawTool tool={tool} leads={geoLeads} onSelect={handleAreaSelect} />
           {geoLeads.map(lead => {
@@ -285,20 +320,6 @@ function RepMap({ rep }) {
           </div>
         )}
 
-        {/* Single lead card */}
-        {selectedLead && selectedLeads.length === 0 && (
-          <RepLeadCard
-            lead={selectedLead}
-            rel={relationOf(selectedLead, rep.id)}
-            busy={busy === selectedLead.id}
-            onClose={() => setSelectedLead(null)}
-            onClaim={() => claimOne(selectedLead)}
-            onRelease={() => releaseOne(selectedLead)}
-            onStatus={s => setStatus(selectedLead, s)}
-            onNavigate={() => openNavigate(selectedLead)}
-          />
-        )}
-
         {/* Multi-select action bar */}
         {selectedLeads.length > 0 && (
           <div className="absolute bottom-0 left-0 right-0 z-[998] bg-slate-900 border-t border-slate-700 rounded-t-2xl p-4 shadow-2xl">
@@ -308,20 +329,14 @@ function RepMap({ rep }) {
             </div>
             <div className="flex gap-2">
               {selOpen.length > 0 && (
-                <button
-                  onClick={() => bulkClaim(selOpen)}
-                  disabled={bulkBusy}
-                  className="flex-1 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm py-2.5 rounded-lg font-semibold"
-                >
+                <button onClick={() => bulkClaim(selOpen)} disabled={bulkBusy}
+                  className="flex-1 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm py-2.5 rounded-lg font-semibold">
                   {bulkBusy ? `${bulkProgress[0]}/${bulkProgress[1]}…` : `Claim ${selOpen.length} open`}
                 </button>
               )}
               {selMine.length > 0 && (
-                <button
-                  onClick={() => bulkRelease(selMine)}
-                  disabled={bulkBusy}
-                  className="flex-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm py-2.5 rounded-lg font-semibold"
-                >
+                <button onClick={() => bulkRelease(selMine)} disabled={bulkBusy}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm py-2.5 rounded-lg font-semibold">
                   {bulkBusy ? `${bulkProgress[0]}/${bulkProgress[1]}…` : `Release ${selMine.length} mine`}
                 </button>
               )}
@@ -329,52 +344,199 @@ function RepMap({ rep }) {
           </div>
         )}
       </div>
+
+      {/* Selected lead — full profile below the map */}
+      {panelOpen && (
+        <RepLeadProfile
+          lead={selectedLead}
+          rel={relationOf(selectedLead, rep.id)}
+          reps={reps.filter(r => r.id !== rep.id)}
+          busy={busy === selectedLead.id}
+          onClose={() => setSelectedLead(null)}
+          onClaim={() => claimOne(selectedLead)}
+          onRelease={() => releaseOne(selectedLead)}
+          onStatus={s => setStatus(selectedLead, s)}
+          onSave={fields => saveProfile(selectedLead, fields)}
+          onTransfer={toRep => transfer(selectedLead, toRep)}
+          onNavigate={() => openNavigate(selectedLead)}
+        />
+      )}
     </div>
   )
 }
 
-function RepLeadCard({ lead, rel, busy, onClose, onClaim, onRelease, onStatus, onNavigate }) {
+function ProfileField({ label, value, onChange, placeholder, disabled }) {
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-[998] bg-slate-900 border-t border-slate-700 rounded-t-2xl p-4 shadow-2xl">
-      <div className="flex justify-between items-start mb-2">
-        <div>
-          <div className="text-white font-semibold text-sm leading-tight">{lead.address}</div>
-          <div className="text-slate-400 text-xs mt-0.5">
-            ZIP {lead.zip}{lead.roof_age ? ` · ${lead.roof_age} yr roof` : ''}
-            {rel === 'others' && <span className="text-orange-400"> · {lead.assigned_rep}</span>}
-            {rel === 'mine' && lead.status && <span className="text-green-400"> · {lead.status}</span>}
+    <div className="flex flex-col gap-1">
+      <label className="text-[11px] text-slate-500 uppercase tracking-wide">{label}</label>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder || ''}
+        disabled={disabled}
+        className="bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 placeholder:text-slate-600 disabled:opacity-60"
+      />
+    </div>
+  )
+}
+
+function RepLeadProfile({ lead, rel, reps, busy, onClose, onClaim, onRelease, onStatus, onSave, onTransfer, onNavigate }) {
+  const editable = rel === 'open' || rel === 'mine'
+  const [form, setForm] = useState({ owner_name: '', phone: '', email: '', insurance: '', note: '' })
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [showLog, setShowLog] = useState(false)
+  const [activity, setActivity] = useState([])
+  const [loadingLog, setLoadingLog] = useState(false)
+
+  useEffect(() => {
+    setForm({ owner_name: lead.owner_name || '', phone: lead.phone || '', email: lead.email || '', insurance: lead.insurance || '', note: '' })
+    setShowLog(false); setActivity([])
+  }, [lead.id])
+
+  async function handleSave() {
+    const fields = {}
+    if (form.owner_name !== (lead.owner_name || '')) fields.owner_name = form.owner_name
+    if (form.phone !== (lead.phone || '')) fields.phone = form.phone
+    if (form.email !== (lead.email || '')) fields.email = form.email
+    if (form.insurance !== (lead.insurance || '')) fields.insurance = form.insurance
+    if (form.note.trim()) fields.notes = form.note.trim()
+    if (Object.keys(fields).length === 0) return
+    setSaving(true); setSaved(false)
+    try {
+      await onSave(fields)
+      setForm(f => ({ ...f, note: '' }))
+      setSaved(true); setTimeout(() => setSaved(false), 2000)
+    } catch (e) { alert('Save failed: ' + e.message) } finally { setSaving(false) }
+  }
+
+  async function toggleLog() {
+    if (showLog) { setShowLog(false); return }
+    setShowLog(true)
+    if (activity.length) return
+    setLoadingLog(true)
+    try { const r = await getLeadActivity(lead.id); setActivity(r.entries || []) }
+    catch (e) { setActivity([{ action: 'error', notes: e.message, timestamp: '' }]) }
+    finally { setLoadingLog(false) }
+  }
+
+  return (
+    <div className="shrink-0 border-t border-slate-700 bg-slate-900 overflow-auto" style={{ maxHeight: '55vh' }}>
+      <div className="p-4">
+        {/* Header */}
+        <div className="flex justify-between items-start mb-3">
+          <div>
+            <div className="text-white font-semibold text-base leading-tight">{lead.address}</div>
+            <div className="text-slate-400 text-xs mt-0.5">
+              ZIP {lead.zip}{lead.roof_age ? ` · ${lead.roof_age} yr roof` : ''}{lead.job_type ? ` · ${lead.job_type}` : ''}
+            </div>
+            <div className="text-xs mt-1">
+              {rel === 'mine' && <span className="text-green-400">Mine{lead.status ? ` · ${lead.status}` : ''}</span>}
+              {rel === 'others' && <span className="text-orange-400">Claimed by {lead.assigned_rep}</span>}
+              {rel === 'open' && <span className="text-blue-400">Open</span>}
+            </div>
           </div>
-          {lead.owner_name && <div className="text-slate-300 text-xs mt-0.5">{lead.owner_name}</div>}
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1"><X size={18} /></button>
         </div>
-        <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1"><X size={16} /></button>
-      </div>
 
-      {rel === 'mine' && (
-        <div className="flex flex-wrap gap-1.5 my-2">
-          {STATUSES.map(s => (
-            <button
-              key={s}
-              onClick={() => onStatus(s)}
-              disabled={busy}
-              className={`text-xs px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50 ${lead.status === s ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300'}`}
-            >{s}</button>
-          ))}
-        </div>
-      )}
-
-      <div className="flex gap-2 mt-2">
-        <button onClick={onNavigate} className="flex-1 flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-white text-sm py-2.5 rounded-lg">
-          <Navigation size={15} /> Navigate
-        </button>
-        {rel === 'open' && (
-          <button onClick={onClaim} disabled={busy} className="flex-1 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm py-2.5 rounded-lg font-semibold">
-            {busy ? 'Claiming…' : 'Claim'}
+        {/* Primary actions */}
+        <div className="flex flex-wrap gap-2 mb-3">
+          {rel === 'open' && (
+            <button onClick={onClaim} disabled={busy} className="flex-1 min-w-28 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm py-2.5 rounded-lg font-semibold">
+              {busy ? 'Claiming…' : 'Claim lead'}
+            </button>
+          )}
+          {rel === 'mine' && (
+            <>
+              <button onClick={onRelease} disabled={busy} className="bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-200 text-sm px-4 py-2.5 rounded-lg font-semibold">
+                {busy ? '…' : 'Unassign'}
+              </button>
+              {reps.length > 0 && (
+                <select
+                  value=""
+                  onChange={e => { const r = reps.find(x => x.id === e.target.value); if (r) onTransfer(r) }}
+                  disabled={busy}
+                  className="bg-slate-800 border border-slate-700 text-slate-200 text-sm px-3 py-2.5 rounded-lg disabled:opacity-50 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">Transfer to…</option>
+                  {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                </select>
+              )}
+            </>
+          )}
+          <button onClick={onNavigate} className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white text-sm px-4 py-2.5 rounded-lg">
+            <Navigation size={15} /> Navigate
           </button>
-        )}
+        </div>
+
+        {/* Status quick buttons (mine) */}
         {rel === 'mine' && (
-          <button onClick={onRelease} disabled={busy} className="flex-1 bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-200 text-sm py-2.5 rounded-lg font-semibold">
-            {busy ? '…' : 'Unassign'}
+          <div className="flex flex-wrap gap-1.5 mb-3">
+            {STATUSES.map(s => (
+              <button key={s} onClick={() => onStatus(s)} disabled={busy}
+                className={`text-xs px-2.5 py-1.5 rounded-lg font-medium disabled:opacity-50 ${lead.status === s ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300'}`}>
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Editable fields */}
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <ProfileField label="Owner" value={form.owner_name} onChange={v => setForm(f => ({ ...f, owner_name: v }))} disabled={!editable} />
+          <ProfileField label="Phone" value={form.phone} onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="(000) 000-0000" disabled={!editable} />
+          <ProfileField label="Email" value={form.email} onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="email@domain.com" disabled={!editable} />
+          <ProfileField label="Insurance" value={form.insurance} onChange={v => setForm(f => ({ ...f, insurance: v }))} placeholder="Carrier" disabled={!editable} />
+        </div>
+
+        {/* Existing notes */}
+        {lead.notes && (
+          <div className="mb-3 text-xs text-slate-400 bg-slate-950 rounded-lg p-3 whitespace-pre-wrap max-h-24 overflow-auto">{lead.notes}</div>
+        )}
+
+        {/* Add note */}
+        {editable && (
+          <div className="flex flex-col gap-1 mb-3">
+            <label className="text-[11px] text-slate-500 uppercase tracking-wide">Add note</label>
+            <textarea
+              value={form.note}
+              onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
+              placeholder="Type a note…"
+              rows={2}
+              className="bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 resize-none placeholder:text-slate-600"
+            />
+          </div>
+        )}
+
+        {/* Save + Log */}
+        <div className="flex items-center gap-3">
+          {editable && (
+            <button onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium">
+              {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}
+            </button>
+          )}
+          <button onClick={toggleLog} className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg ${showLog ? 'bg-slate-800 text-slate-200' : 'text-slate-500 hover:text-slate-300'}`}>
+            <ClipboardList size={14} /> Log
           </button>
+        </div>
+
+        {/* Activity log */}
+        {showLog && (
+          <div className="mt-3 bg-slate-950 rounded-lg p-3">
+            {loadingLog && <div className="text-slate-500 text-xs">Loading…</div>}
+            {!loadingLog && activity.length === 0 && <div className="text-slate-600 text-xs">No activity yet.</div>}
+            {!loadingLog && activity.length > 0 && (
+              <div className="flex flex-col gap-2 max-h-40 overflow-auto">
+                {activity.map((e, i) => (
+                  <div key={i} className="flex gap-2 text-xs">
+                    <div className="text-slate-600 whitespace-nowrap shrink-0 w-24">{e.timestamp}</div>
+                    <div className="text-slate-400 shrink-0 w-16">{ACTION_LABELS[e.action] || e.action}</div>
+                    <div className="text-slate-300">{e.notes || e.status || '—'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -447,9 +609,11 @@ export default function RepWorkspace() {
         ))}
       </div>
 
-      {/* Content */}
-      <div className="flex-1 min-h-0">
-        {tab === 'map' && <RepMap rep={rep} />}
+      {/* Content — the map stays mounted so its ZIP + leads persist across tabs */}
+      <div className="flex-1 min-h-0 relative">
+        <div className={tab === 'map' ? 'h-full' : 'hidden'}>
+          <RepMap rep={rep} active={tab === 'map'} />
+        </div>
         {tab === 'dashboard' && <Placeholder title="Home" lines="Your cards land here next: Claims X/500, Expiring soon, Follow-ups, Pipeline." />}
         {tab === 'leads' && <Placeholder title="My Leads" lines="Your claimed leads — with status, follow-ups, transfer and unassign — ship in the next build." />}
         {tab === 'docs' && <Placeholder title="Documents" lines="Upload and access your documents here (coming soon)." />}
