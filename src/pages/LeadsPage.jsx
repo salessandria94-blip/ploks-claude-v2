@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
-import { getAllLeads, getZipList, getAllReps, assignLead, unassignLead, updateLeadProfile } from '../api/sheets.js'
-import { RefreshCw, ChevronDown, MapPin, ChevronRight } from 'lucide-react'
+import { getAllLeads, getZipList, getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity } from '../api/sheets.js'
+import { RefreshCw, ChevronDown, MapPin, ChevronRight, ClipboardList } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 
@@ -21,6 +21,14 @@ function bucketColor(b) {
 
 // ── Expanded lead profile ──────────────────────────────────────────────────
 
+const ACTION_LABELS = {
+  admin_assign:   'Assigned',
+  admin_unassign: 'Unassigned',
+  status_update:  'Status →',
+  event:          'Event',
+  claim:          'Claimed',
+}
+
 function LeadProfile({ lead, reps, onClose, onLeadUpdate }) {
   const [form, setForm] = useState({
     owner_name: lead.owner_name || '',
@@ -32,6 +40,9 @@ function LeadProfile({ lead, reps, onClose, onLeadUpdate }) {
   })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [showLog, setShowLog] = useState(false)
+  const [activity, setActivity] = useState([])
+  const [loadingLog, setLoadingLog] = useState(false)
 
   async function handleSave() {
     setSaving(true)
@@ -56,6 +67,21 @@ function LeadProfile({ lead, reps, onClose, onLeadUpdate }) {
       alert('Save failed: ' + err.message)
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function handleToggleLog() {
+    if (showLog) { setShowLog(false); return }
+    setShowLog(true)
+    if (activity.length > 0) return
+    setLoadingLog(true)
+    try {
+      const res = await getLeadActivity(lead.id)
+      setActivity(res.entries || [])
+    } catch (err) {
+      setActivity([{ action: 'error', notes: err.message, timestamp: '' }])
+    } finally {
+      setLoadingLog(false)
     }
   }
 
@@ -110,10 +136,35 @@ function LeadProfile({ lead, reps, onClose, onLeadUpdate }) {
           >
             {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save Changes'}
           </button>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 text-sm">
-            Collapse
+          <button
+            onClick={handleToggleLog}
+            className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg transition-colors ${showLog ? 'bg-slate-700 text-slate-200' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'}`}
+          >
+            <ClipboardList size={14} />
+            Log
           </button>
         </div>
+
+        {showLog && (
+          <div className="mt-3 bg-slate-900 rounded-lg p-3">
+            <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Activity Log</div>
+            {loadingLog && <div className="text-slate-500 text-xs">Loading…</div>}
+            {!loadingLog && activity.length === 0 && (
+              <div className="text-slate-600 text-xs">No activity recorded for this lead.</div>
+            )}
+            {!loadingLog && activity.length > 0 && (
+              <div className="flex flex-col gap-2 max-h-48 overflow-auto">
+                {activity.map((entry, i) => (
+                  <div key={i} className="flex gap-3 text-xs">
+                    <div className="text-slate-600 whitespace-nowrap shrink-0 w-28">{entry.timestamp}</div>
+                    <div className="text-slate-400 shrink-0 w-20">{ACTION_LABELS[entry.action] || entry.action}</div>
+                    <div className="text-slate-300">{entry.notes || entry.status || '—'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </td>
     </tr>
   )

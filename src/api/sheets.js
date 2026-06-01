@@ -72,3 +72,7 @@ export async function updateLeadProfile(leadId, fields) {
 export async function unassignAll() {
   return call('unassignAll', {})
 }
+
+export async function getLeadActivity(leadId) {
+  return call('getLeadActivity', { leadId })
+}
