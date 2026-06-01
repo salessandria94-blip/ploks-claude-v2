@@ -363,7 +363,7 @@ export default function LeadsPage() {
                   <Fragment key={lead.id}>
                     <tr
                       onClick={() => setExpandedId(isExpanded ? null : lead.id)}
-                      className={`border-b border-slate-800/60 cursor-pointer transition-colors ${isExpanded ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'}`}
+                      className={`border-b border-slate-800/60 cursor-pointer select-none transition-colors ${isExpanded ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'}`}
                     >
                       <td className="px-4 py-3 text-slate-600">
                         <ChevronRight size={14} className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
