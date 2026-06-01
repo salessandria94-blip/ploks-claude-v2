@@ -16,15 +16,9 @@ function RepCard({ rep }) {
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col gap-4">
-      <div className="flex items-start justify-between">
-        <div>
-          <div className="text-slate-100 font-semibold text-base">{rep.name}</div>
-          <div className="text-slate-500 text-xs mt-0.5">ID: {rep.id}</div>
-        </div>
-        <div className="text-right">
-          <div className="text-2xl font-bold text-blue-400">{rep.assigned_count ?? '—'}</div>
-          <div className="text-slate-500 text-xs">assigned leads</div>
-        </div>
+      <div>
+        <div className="text-slate-100 font-semibold text-base">{rep.name}</div>
+        <div className="text-slate-500 text-xs mt-0.5">ID: {rep.id}</div>
       </div>
 
       <div className="flex items-center gap-2">
@@ -72,17 +66,13 @@ export default function RepsPage() {
 
   useEffect(() => { load() }, [])
 
-  const totalAssigned = reps.reduce((sum, r) => sum + (r.assigned_count || 0), 0)
-
   return (
     <div className="p-6">
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Reps</h1>
           {!loading && reps.length > 0 && (
-            <p className="text-slate-400 text-sm mt-0.5">
-              {reps.length} reps · {totalAssigned} leads assigned
-            </p>
+            <p className="text-slate-400 text-sm mt-0.5">{reps.length} reps</p>
           )}
         </div>
         <button onClick={load} disabled={loading} className="text-slate-400 hover:text-slate-200">
