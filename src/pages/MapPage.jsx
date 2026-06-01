@@ -1,8 +1,8 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import { getZipList, getAllReps, getAllLeads, assignLead, unassignLead } from '../api/sheets.js'
-import { ChevronDown, X, MapPin, RefreshCw, Loader2 } from 'lucide-react'
+import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2 } from 'lucide-react'
 
 const SATELLITE_TILE = {
   url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -10,25 +10,43 @@ const SATELLITE_TILE = {
 }
 const JACKSONVILLE_CENTER = [30.3322, -81.6557]
 
-function leadIcon(color) {
+const BLUE = '#3b82f6'   // unassigned / open
+const ORANGE = '#f97316' // assigned
+const GREEN = '#22c55e'  // selected
+
+function leadIcon(color, selected) {
+  const size = selected ? 18 : 14
+  const ring = selected ? `box-shadow:0 0 0 3px rgba(34,197,94,0.5);` : 'box-shadow:0 1px 4px rgba(0,0,0,0.5);'
   return L.divIcon({
     className: '',
-    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.5)"></div>`,
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
+    html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid white;${ring}"></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   })
 }
 
-const BLUE = '#3b82f6'   // unassigned
-const ORANGE = '#f97316' // assigned
+// ── Geometry ────────────────────────────────────────────────────────────────
 
-// Pan/zoom the map to fit all loaded leads whenever the set changes
+function pointInPolygon(pt, poly) {
+  const x = pt[0], y = pt[1]
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i][0], yi = poly[i][1]
+    const xj = poly[j][0], yj = poly[j][1]
+    const intersect = ((yi > y) !== (yj > y)) && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi)
+    if (intersect) inside = !inside
+  }
+  return inside
+}
+
+// ── Map helpers ──────────────────────────────────────────────────────────────
+
+// Fit map to all leads when the loaded set grows (not on selection changes)
 function FitBounds({ leads }) {
   const map = useMap()
   const lastCount = useRef(0)
   useEffect(() => {
-    if (leads.length === 0) return
-    // only refit when the count actually grows (avoids fighting the user mid-pan)
+    if (leads.length === 0) { lastCount.current = 0; return }
     if (leads.length === lastCount.current) return
     lastCount.current = leads.length
     const pts = leads.filter(l => l.lat && l.lng).map(l => [l.lat, l.lng])
@@ -39,57 +57,216 @@ function FitBounds({ leads }) {
   return null
 }
 
-// ── Lead card (bottom sheet) ────────────────────────────────────────────────
+// Center on a focused lead + keep map sized correctly as the bottom panel opens/closes
+function CenterAndResize({ focusLead, panelOpen }) {
+  const map = useMap()
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 130)
+    return () => clearTimeout(t)
+  }, [panelOpen, map])
+  useEffect(() => {
+    if (!focusLead || !focusLead.lat || !focusLead.lng) return
+    const t = setTimeout(() => {
+      map.invalidateSize()
+      map.setView([focusLead.lat, focusLead.lng], Math.max(map.getZoom(), 16), { animate: true })
+    }, 150)
+    return () => clearTimeout(t)
+  }, [focusLead, map])
+  return null
+}
 
-function LeadCard({ lead, reps, onClose, onAssign, onUnassign, busy }) {
+// Clear selection when clicking empty map (only when no draw tool active)
+function ClickToClear({ enabled, onClear }) {
+  useMapEvents({ click: () => { if (enabled) onClear() } })
+  return null
+}
+
+// Lasso / radius drawing. Disables panning while a tool is active.
+function DrawTool({ tool, leads, onSelect }) {
+  const map = useMap()
+  useEffect(() => {
+    if (!tool) { map.dragging.enable(); return }
+    map.dragging.disable()
+    map.getContainer().style.cursor = 'crosshair'
+
+    let drawing = false
+    let layer = null
+    let points = []
+    let center = null
+
+    const clearLayer = () => { if (layer) { map.removeLayer(layer); layer = null } }
+
+    function onDown(e) {
+      drawing = true
+      clearLayer()
+      if (tool === 'lasso') {
+        points = [e.latlng]
+        layer = L.polyline(points, { color: GREEN, weight: 2 }).addTo(map)
+      } else {
+        center = e.latlng
+        layer = L.circle(center, { radius: 0, color: GREEN, weight: 2, fillColor: GREEN, fillOpacity: 0.12 }).addTo(map)
+      }
+    }
+    function onMove(e) {
+      if (!drawing) return
+      if (tool === 'lasso') {
+        points.push(e.latlng)
+        layer.setLatLngs(points)
+      } else {
+        layer.setRadius(center.distanceTo(e.latlng))
+      }
+    }
+    function onUp() {
+      if (!drawing) return
+      drawing = false
+      if (tool === 'lasso') {
+        if (points.length < 3) { clearLayer(); return }
+        const poly = points.map(p => [p.lat, p.lng])
+        clearLayer()
+        layer = L.polygon(poly, { color: GREEN, weight: 2, fillColor: GREEN, fillOpacity: 0.12 }).addTo(map)
+        onSelect(leads.filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], poly)))
+      } else {
+        const r = layer.getRadius()
+        if (r < 1) { clearLayer(); return }
+        onSelect(leads.filter(l => l.lat && l.lng && center.distanceTo(L.latLng(l.lat, l.lng)) <= r))
+      }
+    }
+
+    map.on('mousedown', onDown)
+    map.on('mousemove', onMove)
+    map.on('mouseup', onUp)
+    return () => {
+      map.off('mousedown', onDown)
+      map.off('mousemove', onMove)
+      map.off('mouseup', onUp)
+      clearLayer()
+      map.dragging.enable()
+      map.getContainer().style.cursor = ''
+    }
+  }, [tool, leads, map, onSelect])
+  return null
+}
+
+// ── Assign dropdown (shared) ──────────────────────────────────────────────────
+
+function AssignDropdown({ lead, reps, busy, onAssign, onUnassign, dropUp }) {
   const [open, setOpen] = useState(false)
-  if (!lead) return null
   const isAssigned = !!lead.assigned_rep_id
-
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-[998] bg-slate-900 border-t border-slate-700 rounded-t-2xl p-4 shadow-2xl">
-      <div className="flex justify-between items-start mb-3">
-        <div>
-          <div className="text-white font-semibold text-sm leading-tight">{lead.address}</div>
-          <div className="text-slate-400 text-xs mt-0.5">
-            ZIP {lead.zip}{lead.bucket ? ` · ${lead.bucket}` : ''}{lead.status ? ` · ${lead.status}` : ''}
-          </div>
-          {lead.owner_name && <div className="text-slate-300 text-xs mt-1">Owner: {lead.owner_name}</div>}
-          {isAssigned && <div className="text-orange-400 text-xs mt-0.5">Assigned to: {lead.assigned_rep}</div>}
+    <div className="relative">
+      <button
+        onClick={() => setOpen(o => !o)}
+        disabled={busy}
+        className="w-full flex items-center justify-between gap-2 text-sm px-3 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-medium transition-colors disabled:opacity-50"
+      >
+        <span>{busy ? 'Saving…' : isAssigned ? `Reassign · ${lead.assigned_rep}` : 'Assign to rep'}</span>
+        <ChevronDown size={14} />
+      </button>
+      {open && !busy && (
+        <div className={`absolute left-0 z-[999] w-full bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto ${dropUp ? 'bottom-12' : 'top-12'}`}>
+          {isAssigned && (
+            <button
+              onClick={() => { setOpen(false); onUnassign(lead) }}
+              className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-slate-800 transition-colors border-b border-slate-700"
+            >
+              Unassign
+            </button>
+          )}
+          {reps.map(rep => (
+            <button
+              key={rep.id}
+              onClick={() => { setOpen(false); onAssign(lead, rep) }}
+              className={`w-full text-left px-4 py-2.5 text-sm hover:bg-slate-800 transition-colors ${lead.assigned_rep_id === rep.id ? 'text-blue-400' : 'text-slate-200'}`}
+            >
+              {rep.name}
+            </button>
+          ))}
         </div>
-        <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1"><X size={16} /></button>
-      </div>
+      )}
+    </div>
+  )
+}
 
-      <div className="relative">
-        <button
-          onClick={() => setOpen(o => !o)}
-          disabled={busy}
-          className="w-full flex items-center justify-between gap-2 text-sm px-3 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 transition-colors disabled:opacity-50"
-        >
-          <span>{busy ? 'Saving…' : isAssigned ? `Reassign (${lead.assigned_rep})` : 'Assign to rep'}</span>
-          <ChevronDown size={14} />
-        </button>
-        {open && !busy && (
-          <div className="absolute left-0 bottom-12 z-[999] w-full bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden max-h-60 overflow-y-auto">
-            {isAssigned && (
-              <button
-                onClick={() => { setOpen(false); onUnassign(lead) }}
-                className="w-full text-left px-4 py-2.5 text-sm text-red-400 hover:bg-slate-800 transition-colors border-b border-slate-700"
-              >
-                Unassign
-              </button>
-            )}
-            {reps.map(rep => (
-              <button
-                key={rep.id}
-                onClick={() => { setOpen(false); onAssign(lead, rep) }}
-                className={`w-full text-left px-4 py-2.5 text-sm hover:bg-slate-800 transition-colors ${lead.assigned_rep_id === rep.id ? 'text-blue-400' : 'text-slate-200'}`}
-              >
-                {rep.name}
-              </button>
-            ))}
+// ── Bottom panels ──────────────────────────────────────────────────────────
+
+function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose }) {
+  return (
+    <div className="shrink-0 border-t border-slate-800 bg-slate-900 max-h-72 overflow-auto">
+      <div className="p-4">
+        <div className="flex items-start justify-between mb-3">
+          <div>
+            <div className="text-white font-semibold text-base leading-tight">{lead.address}</div>
+            <div className="text-slate-400 text-xs mt-1">
+              ZIP {lead.zip}{lead.bucket ? ` · ${lead.bucket}` : ''}{lead.status ? ` · ${lead.status}` : ''}
+            </div>
           </div>
-        )}
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1"><X size={18} /></button>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-sm">
+          <Fact label="Owner" value={lead.owner_name} />
+          <Fact label="Roof Age" value={lead.roof_age ? `${lead.roof_age} yr` : ''} />
+          <Fact label="Job Type" value={lead.job_type} />
+          <Fact label="Assigned" value={lead.assigned_rep} valueClass={lead.assigned_rep ? 'text-orange-400' : ''} />
+        </div>
+
+        <div className="max-w-xs">
+          <AssignDropdown lead={lead} reps={reps} busy={busy} onAssign={onAssign} onUnassign={onUnassign} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Fact({ label, value, valueClass }) {
+  return (
+    <div>
+      <div className="text-slate-500 text-xs uppercase tracking-wide">{label}</div>
+      <div className={`text-slate-200 mt-0.5 ${valueClass || ''}`}>{value || '—'}</div>
+    </div>
+  )
+}
+
+function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, onClear }) {
+  const [repId, setRepId] = useState('')
+  const rep = reps.find(r => r.id === repId)
+  return (
+    <div className="shrink-0 border-t border-slate-800 bg-slate-900 max-h-72 overflow-auto">
+      <div className="p-4">
+        <div className="flex items-center justify-between mb-3">
+          <div className="text-white font-semibold text-base">{leads.length} leads selected</div>
+          <button onClick={onClear} className="flex items-center gap-1.5 text-slate-400 hover:text-slate-200 text-sm">
+            <Trash2 size={14} /> Clear
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 mb-3">
+          <select
+            value={repId}
+            onChange={e => setRepId(e.target.value)}
+            disabled={bulkBusy}
+            className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+          >
+            <option value="">Select a rep…</option>
+            {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+          <button
+            onClick={() => rep && onBulkAssign(leads, rep)}
+            disabled={!rep || bulkBusy}
+            className="text-sm px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium transition-colors"
+          >
+            {bulkBusy ? `Assigning ${bulkProgress[0]}/${bulkProgress[1]}…` : `Assign all to ${rep ? rep.name : 'rep'}`}
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-1 max-h-32 overflow-auto text-xs">
+          {leads.map(l => (
+            <div key={l.id} className="flex justify-between gap-3 text-slate-400">
+              <span className="truncate">{l.address}</span>
+              <span className="shrink-0 text-slate-600">{l.assigned_rep || 'open'}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -101,11 +278,15 @@ export default function MapPage() {
   const [zips, setZips] = useState([])
   const [reps, setReps] = useState([])
   const [loadingMeta, setLoadingMeta] = useState(true)
-  const [activeZips, setActiveZips] = useState([])      // zips currently displayed
-  const [loadingZips, setLoadingZips] = useState([])    // zips currently fetching
-  const [leadsByZip, setLeadsByZip] = useState({})      // { zip: [leads] }
+  const [activeZips, setActiveZips] = useState([])
+  const [loadingZips, setLoadingZips] = useState([])
+  const [leadsByZip, setLeadsByZip] = useState({})
   const [selectedLead, setSelectedLead] = useState(null)
+  const [selectedLeads, setSelectedLeads] = useState([])
+  const [tool, setTool] = useState(null)
   const [busy, setBusy] = useState(null)
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState([0, 0])
   const [error, setError] = useState('')
   const [loadingAll, setLoadingAll] = useState(false)
   const [allProgress, setAllProgress] = useState([0, 0])
@@ -125,20 +306,21 @@ export default function MapPage() {
     loadMeta()
   }, [])
 
-  // Flatten all displayed leads from active zips
-  const leads = useMemo(() => {
-    return activeZips.flatMap(z => leadsByZip[z] || [])
-      .filter(l => l.lat && l.lng)
-  }, [activeZips, leadsByZip])
+  const leads = useMemo(
+    () => activeZips.flatMap(z => leadsByZip[z] || []).filter(l => l.lat && l.lng),
+    [activeZips, leadsByZip]
+  )
+
+  const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
 
   async function fetchZip(zip) {
-    if (leadsByZip[zip]) return leadsByZip[zip]   // cached
+    if (leadsByZip[zip]) return leadsByZip[zip]
     setLoadingZips(prev => [...prev, zip])
     try {
       const res = await getAllLeads(zip)
-      const leads = res.leads || []
-      setLeadsByZip(prev => ({ ...prev, [zip]: leads }))
-      return leads
+      const got = res.leads || []
+      setLeadsByZip(prev => ({ ...prev, [zip]: got }))
+      return got
     } finally {
       setLoadingZips(prev => prev.filter(z => z !== zip))
     }
@@ -163,11 +345,10 @@ export default function MapPage() {
     setError('')
     setAllProgress([0, zips.length])
     let done = 0
-    // Fire all in parallel; render each as it resolves
     await Promise.allSettled(zips.map(async zip => {
       try {
         await fetchZip(zip)
-        setActiveZips(prev => prev.includes(zip) ? prev : [...prev, zip])
+        setActiveZips(prev => (prev.includes(zip) ? prev : [...prev, zip]))
       } finally {
         done++
         setAllProgress([done, zips.length])
@@ -176,22 +357,39 @@ export default function MapPage() {
     setLoadingAll(false)
   }
 
-  function clearAll() {
+  function clearMap() {
     setActiveZips([])
     setSelectedLead(null)
+    setSelectedLeads([])
   }
 
-  // Update a lead in place across the zip cache
+  function clearSelection() {
+    setSelectedLead(null)
+    setSelectedLeads([])
+  }
+
   function patchLead(leadId, patch) {
     setLeadsByZip(prev => {
       const next = {}
       for (const [zip, list] of Object.entries(prev)) {
-        next[zip] = list.map(l => l.id === leadId ? { ...l, ...patch } : l)
+        next[zip] = list.map(l => (l.id === leadId ? { ...l, ...patch } : l))
       }
       return next
     })
-    setSelectedLead(prev => prev && prev.id === leadId ? { ...prev, ...patch } : prev)
+    setSelectedLead(prev => (prev && prev.id === leadId ? { ...prev, ...patch } : prev))
+    setSelectedLeads(prev => prev.map(l => (l.id === leadId ? { ...l, ...patch } : l)))
   }
+
+  function handleMarkerClick(lead) {
+    if (tool) return // drawing takes over while a tool is active
+    setSelectedLeads([])
+    setSelectedLead(lead)
+  }
+
+  const handleAreaSelect = useCallback(sel => {
+    setSelectedLead(null)
+    setSelectedLeads(sel)
+  }, [])
 
   async function handleAssign(lead, rep) {
     setBusy(lead.id)
@@ -217,6 +415,29 @@ export default function MapPage() {
     }
   }
 
+  async function handleBulkAssign(targets, rep) {
+    setBulkBusy(true)
+    setError('')
+    setBulkProgress([0, targets.length])
+    let done = 0
+    let ok = 0
+    await Promise.allSettled(targets.map(async lead => {
+      try {
+        await assignLead(lead.id, rep.id, rep.name)
+        patchLead(lead.id, { assigned_rep: rep.name, assigned_rep_id: rep.id })
+        ok++
+      } finally {
+        done++
+        setBulkProgress([done, targets.length])
+      }
+    }))
+    setBulkBusy(false)
+    const failed = targets.length - ok
+    if (failed > 0) setError(`${ok} assigned, ${failed} failed (leads without a Lead ID can't be assigned yet).`)
+    setSelectedLeads([])
+  }
+
+  const panelOpen = !!selectedLead || selectedLeads.length > 0
   const unassignedCount = leads.filter(l => !l.assigned_rep_id).length
   const assignedCount = leads.length - unassignedCount
 
@@ -249,7 +470,7 @@ export default function MapPage() {
             </button>
             {activeZips.length > 0 && (
               <button
-                onClick={clearAll}
+                onClick={clearMap}
                 className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
               >
                 Clear
@@ -258,7 +479,6 @@ export default function MapPage() {
           </div>
         </div>
 
-        {/* ZIP chips */}
         <div className="flex flex-wrap gap-1.5">
           {loadingMeta && <span className="text-slate-500 text-xs">Loading ZIPs…</span>}
           {zips.map(zip => {
@@ -280,26 +500,28 @@ export default function MapPage() {
         </div>
       </div>
 
-      {error && <div className="text-red-400 text-sm px-4 py-2 bg-red-950/30">{error}</div>}
+      {error && <div className="text-red-400 text-sm px-4 py-2 bg-red-950/30 shrink-0">{error}</div>}
 
       {/* Map */}
       <div className="relative flex-1 min-h-0">
-        <MapContainer
-          center={JACKSONVILLE_CENTER}
-          zoom={11}
-          style={{ height: '100%', width: '100%' }}
-          zoomControl={false}
-        >
+        <MapContainer center={JACKSONVILLE_CENTER} zoom={11} style={{ height: '100%', width: '100%' }} zoomControl={false}>
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
           <FitBounds leads={leads} />
-          {leads.map(lead => (
-            <Marker
-              key={lead.id}
-              position={[lead.lat, lead.lng]}
-              icon={leadIcon(lead.assigned_rep_id ? ORANGE : BLUE)}
-              eventHandlers={{ click: () => setSelectedLead(lead) }}
-            />
-          ))}
+          <CenterAndResize focusLead={selectedLead} panelOpen={panelOpen} />
+          <ClickToClear enabled={!tool} onClear={clearSelection} />
+          <DrawTool tool={tool} leads={leads} onSelect={handleAreaSelect} />
+          {leads.map(lead => {
+            const isSel = selectedIds.has(lead.id) || (selectedLead && selectedLead.id === lead.id)
+            const color = isSel ? GREEN : lead.assigned_rep_id ? ORANGE : BLUE
+            return (
+              <Marker
+                key={lead.id}
+                position={[lead.lat, lead.lng]}
+                icon={leadIcon(color, isSel)}
+                eventHandlers={{ click: () => handleMarkerClick(lead) }}
+              />
+            )
+          })}
         </MapContainer>
 
         {/* Legend */}
@@ -308,9 +530,34 @@ export default function MapPage() {
           <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full inline-block" style={{ background: ORANGE }} /> Assigned</div>
         </div>
 
+        {/* Tool buttons */}
+        <div className="absolute top-3 right-3 z-[999] flex flex-col gap-2">
+          <button
+            onClick={() => setTool(t => (t === 'lasso' ? null : 'lasso'))}
+            title="Lasso select"
+            className={`p-2 rounded-lg border shadow-lg transition-colors ${tool === 'lasso' ? 'bg-green-600 border-green-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}
+          >
+            <Lasso size={16} />
+          </button>
+          <button
+            onClick={() => setTool(t => (t === 'radius' ? null : 'radius'))}
+            title="Radius select"
+            className={`p-2 rounded-lg border shadow-lg transition-colors ${tool === 'radius' ? 'bg-green-600 border-green-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}
+          >
+            <Target size={16} />
+          </button>
+        </div>
+
+        {/* Tool hint */}
+        {tool && (
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[999] bg-green-900/90 text-green-200 text-xs px-3 py-1.5 rounded-lg shadow-lg pointer-events-none">
+            {tool === 'lasso' ? 'Draw a loop around leads to select' : 'Drag out from a center point to select'}
+          </div>
+        )}
+
         {/* Empty state */}
         {activeZips.length === 0 && !loadingAll && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="bg-slate-900/80 rounded-xl px-5 py-4 text-center">
               <MapPin size={28} className="text-slate-600 mb-2 mx-auto" />
               <div className="text-slate-300 text-sm font-medium">Select a ZIP to plot leads</div>
@@ -318,16 +565,29 @@ export default function MapPage() {
             </div>
           </div>
         )}
+      </div>
 
-        <LeadCard
+      {/* Bottom panel: single profile or multi-select */}
+      {selectedLead && (
+        <SingleLeadPanel
           lead={selectedLead}
           reps={reps}
-          busy={busy === (selectedLead && selectedLead.id)}
-          onClose={() => setSelectedLead(null)}
+          busy={busy === selectedLead.id}
           onAssign={handleAssign}
           onUnassign={handleUnassign}
+          onClose={clearSelection}
         />
-      </div>
+      )}
+      {!selectedLead && selectedLeads.length > 0 && (
+        <MultiSelectPanel
+          leads={selectedLeads}
+          reps={reps}
+          bulkBusy={bulkBusy}
+          bulkProgress={bulkProgress}
+          onBulkAssign={handleBulkAssign}
+          onClear={clearSelection}
+        />
+      )}
     </div>
   )
 }
