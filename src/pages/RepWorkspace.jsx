@@ -176,7 +176,7 @@ function RepMap({ rep, active }) {
   async function claimOne(lead) {
     setBusy(lead.id)
     try {
-      await claimLead(lead.id, rep.id, rep.name, null)
+      await claimLead(lead.id, rep.id, rep.name, null, lead.zip)
       patchLead(lead.id, { assigned_rep: rep.name, assigned_rep_id: rep.id, status: lead.status || 'No Contact' })
     } catch (err) { alert(err.message) } finally { setBusy(null) }
   }
@@ -213,7 +213,7 @@ function RepMap({ rep, active }) {
     let done = 0, ok = 0
     await Promise.allSettled(targets.map(async lead => {
       try {
-        await claimLead(lead.id, rep.id, rep.name, null)
+        await claimLead(lead.id, rep.id, rep.name, null, lead.zip)
         patchLead(lead.id, { assigned_rep: rep.name, assigned_rep_id: rep.id, status: lead.status || 'No Contact' })
         ok++
       } finally { done++; setBulkProgress([done, targets.length]) }
