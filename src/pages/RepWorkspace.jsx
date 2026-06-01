@@ -196,8 +196,17 @@ function RepMap({ rep, active }) {
   }
   async function saveProfile(lead, fields) {
     await updateLeadProfile(lead.id, fields)
-    const { notes, ...rest } = fields // notes are appended server-side; sync on next load
-    patchLead(lead.id, rest)
+    const patch = { ...fields }
+    if (fields.notes) {
+      // Mirror the server's "[MM/dd/yy HH:mm] note" append so the rep sees the
+      // note immediately in the notes history instead of it seeming to vanish.
+      const d = new Date()
+      const p = n => String(n).padStart(2, '0')
+      const ts = `${p(d.getMonth() + 1)}/${p(d.getDate())}/${p(d.getFullYear() % 100)} ${p(d.getHours())}:${p(d.getMinutes())}`
+      const line = `[${ts}] ${fields.notes}`
+      patch.notes = lead.notes ? `${lead.notes}\n${line}` : line
+    }
+    patchLead(lead.id, patch)
   }
   async function transfer(lead, toRep) {
     setBusy(lead.id)
