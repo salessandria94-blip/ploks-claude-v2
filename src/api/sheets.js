@@ -76,3 +76,7 @@ export async function unassignAll() {
 export async function getLeadActivity(leadId) {
   return call('getLeadActivity', { leadId })
 }
+
+export async function getRepStats() {
+  return call('getRepStats', {})
+}
