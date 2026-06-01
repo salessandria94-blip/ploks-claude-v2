@@ -81,13 +81,16 @@ function ClickToClear({ enabled, onClear }) {
   return null
 }
 
-// Lasso / radius drawing. Disables panning while a tool is active.
+// Lasso / radius drawing. Uses pointer events so it works with mouse,
+// touch (phone/tablet), and stylus alike. Disables panning while active.
 function DrawTool({ tool, leads, onSelect }) {
   const map = useMap()
   useEffect(() => {
     if (!tool) { map.dragging.enable(); return }
+    const container = map.getContainer()
     map.dragging.disable()
-    map.getContainer().style.cursor = 'crosshair'
+    container.style.cursor = 'crosshair'
+    container.style.touchAction = 'none' // stop the browser from scrolling/zooming mid-draw
 
     let drawing = false
     let layer = null
@@ -95,30 +98,41 @@ function DrawTool({ tool, leads, onSelect }) {
     let center = null
 
     const clearLayer = () => { if (layer) { map.removeLayer(layer); layer = null } }
+    const toLatLng = e => {
+      const rect = container.getBoundingClientRect()
+      return map.containerPointToLatLng(L.point(e.clientX - rect.left, e.clientY - rect.top))
+    }
 
     function onDown(e) {
+      if (e.button != null && e.button !== 0) return // primary button / single touch only
+      e.preventDefault()
       drawing = true
+      try { container.setPointerCapture(e.pointerId) } catch { /* noop */ }
       clearLayer()
+      const ll = toLatLng(e)
       if (tool === 'lasso') {
-        points = [e.latlng]
+        points = [ll]
         layer = L.polyline(points, { color: GREEN, weight: 2 }).addTo(map)
       } else {
-        center = e.latlng
+        center = ll
         layer = L.circle(center, { radius: 0, color: GREEN, weight: 2, fillColor: GREEN, fillOpacity: 0.12 }).addTo(map)
       }
     }
     function onMove(e) {
       if (!drawing) return
+      e.preventDefault()
+      const ll = toLatLng(e)
       if (tool === 'lasso') {
-        points.push(e.latlng)
+        points.push(ll)
         layer.setLatLngs(points)
       } else {
-        layer.setRadius(center.distanceTo(e.latlng))
+        layer.setRadius(center.distanceTo(ll))
       }
     }
-    function onUp() {
+    function onUp(e) {
       if (!drawing) return
       drawing = false
+      try { container.releasePointerCapture(e.pointerId) } catch { /* noop */ }
       if (tool === 'lasso') {
         if (points.length < 3) { clearLayer(); return }
         const poly = points.map(p => [p.lat, p.lng])
@@ -126,22 +140,25 @@ function DrawTool({ tool, leads, onSelect }) {
         layer = L.polygon(poly, { color: GREEN, weight: 2, fillColor: GREEN, fillOpacity: 0.12 }).addTo(map)
         onSelect(leads.filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], poly)))
       } else {
-        const r = layer.getRadius()
+        const r = layer ? layer.getRadius() : 0
         if (r < 1) { clearLayer(); return }
         onSelect(leads.filter(l => l.lat && l.lng && center.distanceTo(L.latLng(l.lat, l.lng)) <= r))
       }
     }
 
-    map.on('mousedown', onDown)
-    map.on('mousemove', onMove)
-    map.on('mouseup', onUp)
+    container.addEventListener('pointerdown', onDown)
+    container.addEventListener('pointermove', onMove)
+    container.addEventListener('pointerup', onUp)
+    container.addEventListener('pointercancel', onUp)
     return () => {
-      map.off('mousedown', onDown)
-      map.off('mousemove', onMove)
-      map.off('mouseup', onUp)
+      container.removeEventListener('pointerdown', onDown)
+      container.removeEventListener('pointermove', onMove)
+      container.removeEventListener('pointerup', onUp)
+      container.removeEventListener('pointercancel', onUp)
       clearLayer()
       map.dragging.enable()
-      map.getContainer().style.cursor = ''
+      container.style.cursor = ''
+      container.style.touchAction = ''
     }
   }, [tool, leads, map, onSelect])
   return null
