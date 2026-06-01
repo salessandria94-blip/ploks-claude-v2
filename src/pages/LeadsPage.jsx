@@ -36,7 +36,7 @@ function LeadProfile({ lead, reps, onClose, onLeadUpdate }) {
     email:      lead.email || '',
     insurance:  lead.insurance || '',
     status:     lead.status || '',
-    note:       '',
+    notes:      lead.notes || '',
   })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -53,14 +53,13 @@ function LeadProfile({ lead, reps, onClose, onLeadUpdate }) {
     if (form.email !== lead.email)           fields.email = form.email
     if (form.insurance !== lead.insurance)   fields.insurance = form.insurance
     if (form.status !== lead.status)         fields.status = form.status
-    if (form.note.trim())                    fields.notes = form.note.trim()
+    if (form.notes !== (lead.notes || ''))   fields.notes = form.notes
 
     if (Object.keys(fields).length === 0) { setSaving(false); return }
 
     try {
       await updateLeadProfile(lead.id, fields)
-      onLeadUpdate(lead.id, { ...fields, notes: lead.notes, note: '' })
-      setForm(f => ({ ...f, note: '' }))
+      onLeadUpdate(lead.id, fields)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
     } catch (err) {
@@ -111,19 +110,13 @@ function LeadProfile({ lead, reps, onClose, onLeadUpdate }) {
           </div>
         </div>
 
-        {lead.notes && (
-          <div className="mt-3 text-xs text-slate-400 bg-slate-900 rounded-lg p-3 whitespace-pre-wrap max-h-24 overflow-auto">
-            {lead.notes}
-          </div>
-        )}
-
         <div className="mt-3 flex flex-col gap-1">
-          <label className="text-xs text-slate-500 uppercase tracking-wide">Add Note</label>
+          <label className="text-xs text-slate-500 uppercase tracking-wide">Notes</label>
           <textarea
-            value={form.note}
-            onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
-            placeholder="Type a note…"
-            rows={2}
+            value={form.notes}
+            onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+            placeholder="Current notes…"
+            rows={3}
             className="bg-slate-900 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 resize-none placeholder:text-slate-600"
           />
         </div>

@@ -91,8 +91,8 @@ export async function unassignLeadsBulk(leadIds, repId, zip) {
   return call('unassignLeadsBulk', { leadIds, repId, zip })
 }
 
-export async function updateLeadProfile(leadId, fields) {
-  return call('updateLeadProfile', { leadId, fields })
+export async function updateLeadProfile(leadId, fields, repId) {
+  return call('updateLeadProfile', { leadId, fields, repId })
 }
 
 export async function unassignAll() {

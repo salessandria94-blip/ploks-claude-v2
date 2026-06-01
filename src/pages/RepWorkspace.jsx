@@ -16,8 +16,9 @@ import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, N
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
 const ACTION_LABELS = {
-  admin_assign: 'Assigned', admin_unassign: 'Unassigned', status_update: 'Status',
-  claim: 'Claimed', auto_recycle: 'Recycled', event: 'Event',
+  admin_assign: 'Assigned', admin_unassign: 'Unassigned', status_update: 'Status changed',
+  claim: 'Claimed', bulk_claim: 'Claimed', bulk_unassign: 'Released',
+  note: 'Note', auto_recycle: 'Recycled', event: 'Event',
 }
 
 function relationOf(lead, repId) {
@@ -195,18 +196,9 @@ function RepMap({ rep, active }) {
     } catch (err) { alert(err.message) } finally { setBusy(null) }
   }
   async function saveProfile(lead, fields) {
-    await updateLeadProfile(lead.id, fields)
-    const patch = { ...fields }
-    if (fields.notes) {
-      // Mirror the server's "[MM/dd/yy HH:mm] note" append so the rep sees the
-      // note immediately in the notes history instead of it seeming to vanish.
-      const d = new Date()
-      const p = n => String(n).padStart(2, '0')
-      const ts = `${p(d.getMonth() + 1)}/${p(d.getDate())}/${p(d.getFullYear() % 100)} ${p(d.getHours())}:${p(d.getMinutes())}`
-      const line = `[${ts}] ${fields.notes}`
-      patch.notes = lead.notes ? `${lead.notes}\n${line}` : line
-    }
-    patchLead(lead.id, patch)
+    // notes is the current value (replace); a stamped snapshot is logged server-side
+    await updateLeadProfile(lead.id, fields, rep.id)
+    patchLead(lead.id, fields)
   }
   async function transfer(lead, toRep) {
     setBusy(lead.id)
@@ -356,7 +348,8 @@ function RepMap({ rep, active }) {
         <RepLeadProfile
           lead={selectedLead}
           rel={relationOf(selectedLead, rep.id)}
-          reps={reps.filter(r => r.id !== rep.id)}
+          reps={reps}
+          meId={rep.id}
           busy={busy === selectedLead.id}
           onClose={() => setSelectedLead(null)}
           onClaim={() => claimOne(selectedLead)}
@@ -386,18 +379,22 @@ function ProfileField({ label, value, onChange, placeholder, disabled }) {
   )
 }
 
-function RepLeadProfile({ lead, rel, reps, busy, onClose, onClaim, onRelease, onStatus, onSave, onTransfer, onNavigate }) {
+function RepLeadProfile({ lead, rel, reps, meId, busy, onClose, onClaim, onRelease, onStatus, onSave, onTransfer, onNavigate }) {
   const editable = rel === 'open' || rel === 'mine'
-  const [form, setForm] = useState({ owner_name: '', phone: '', email: '', insurance: '', note: '' })
+  const transferReps = reps.filter(r => r.id !== meId)
+  const [form, setForm] = useState({ owner_name: '', phone: '', email: '', insurance: '', notes: '' })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [showLog, setShowLog] = useState(false)
+  const [logOpen, setLogOpen] = useState(false)
   const [activity, setActivity] = useState([])
   const [loadingLog, setLoadingLog] = useState(false)
 
   useEffect(() => {
-    setForm({ owner_name: lead.owner_name || '', phone: lead.phone || '', email: lead.email || '', insurance: lead.insurance || '', note: '' })
-    setShowLog(false); setActivity([])
+    setForm({
+      owner_name: lead.owner_name || '', phone: lead.phone || '',
+      email: lead.email || '', insurance: lead.insurance || '', notes: lead.notes || '',
+    })
+    setLogOpen(false); setActivity([])
   }, [lead.id])
 
   async function handleSave() {
@@ -406,25 +403,23 @@ function RepLeadProfile({ lead, rel, reps, busy, onClose, onClaim, onRelease, on
     if (form.phone !== (lead.phone || '')) fields.phone = form.phone
     if (form.email !== (lead.email || '')) fields.email = form.email
     if (form.insurance !== (lead.insurance || '')) fields.insurance = form.insurance
-    if (form.note.trim()) fields.notes = form.note.trim()
+    if (form.notes !== (lead.notes || '')) fields.notes = form.notes
     if (Object.keys(fields).length === 0) return
     setSaving(true); setSaved(false)
     try {
-      await onSave(fields)
-      setForm(f => ({ ...f, note: '' }))
+      await onSave(fields)           // notes persist in the box (current value)
       setSaved(true); setTimeout(() => setSaved(false), 2000)
     } catch (e) { alert('Save failed: ' + e.message) } finally { setSaving(false) }
   }
 
-  async function toggleLog() {
-    if (showLog) { setShowLog(false); return }
-    setShowLog(true)
-    if (activity.length) return
+  async function openLog() {
+    setLogOpen(true)
     setLoadingLog(true)
     try { const r = await getLeadActivity(lead.id); setActivity(r.entries || []) }
     catch (e) { setActivity([{ action: 'error', notes: e.message, timestamp: '' }]) }
     finally { setLoadingLog(false) }
   }
+  const repName = id => (reps.find(r => r.id === id) || {}).name || id || 'System'
 
   return (
     <div className="shrink-0 border-t border-slate-700 bg-slate-900 overflow-auto" style={{ maxHeight: '55vh' }}>
@@ -457,15 +452,15 @@ function RepLeadProfile({ lead, rel, reps, busy, onClose, onClaim, onRelease, on
               <button onClick={onRelease} disabled={busy} className="bg-red-900 hover:bg-red-800 disabled:opacity-50 text-red-200 text-sm px-4 py-2.5 rounded-lg font-semibold">
                 {busy ? '…' : 'Unassign'}
               </button>
-              {reps.length > 0 && (
+              {transferReps.length > 0 && (
                 <select
                   value=""
-                  onChange={e => { const r = reps.find(x => x.id === e.target.value); if (r) onTransfer(r) }}
+                  onChange={e => { const r = transferReps.find(x => x.id === e.target.value); if (r) onTransfer(r) }}
                   disabled={busy}
                   className="bg-slate-800 border border-slate-700 text-slate-200 text-sm px-3 py-2.5 rounded-lg disabled:opacity-50 focus:outline-none focus:border-blue-500"
                 >
                   <option value="">Transfer to…</option>
-                  {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+                  {transferReps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                 </select>
               )}
             </>
@@ -495,24 +490,18 @@ function RepLeadProfile({ lead, rel, reps, busy, onClose, onClaim, onRelease, on
           <ProfileField label="Insurance" value={form.insurance} onChange={v => setForm(f => ({ ...f, insurance: v }))} placeholder="Carrier" disabled={!editable} />
         </div>
 
-        {/* Existing notes */}
-        {lead.notes && (
-          <div className="mb-3 text-xs text-slate-400 bg-slate-950 rounded-lg p-3 whitespace-pre-wrap max-h-24 overflow-auto">{lead.notes}</div>
-        )}
-
-        {/* Add note */}
-        {editable && (
-          <div className="flex flex-col gap-1 mb-3">
-            <label className="text-[11px] text-slate-500 uppercase tracking-wide">Add note</label>
-            <textarea
-              value={form.note}
-              onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
-              placeholder="Type a note…"
-              rows={2}
-              className="bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 resize-none placeholder:text-slate-600"
-            />
-          </div>
-        )}
+        {/* Notes — current value, persists after save */}
+        <div className="flex flex-col gap-1 mb-3">
+          <label className="text-[11px] text-slate-500 uppercase tracking-wide">Notes</label>
+          <textarea
+            value={form.notes}
+            onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+            placeholder="Current notes…"
+            rows={3}
+            disabled={!editable}
+            className="bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 resize-none placeholder:text-slate-600 disabled:opacity-60"
+          />
+        </div>
 
         {/* Save + Log */}
         <div className="flex items-center gap-3">
@@ -521,30 +510,38 @@ function RepLeadProfile({ lead, rel, reps, busy, onClose, onClaim, onRelease, on
               {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}
             </button>
           )}
-          <button onClick={toggleLog} className={`flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg ${showLog ? 'bg-slate-800 text-slate-200' : 'text-slate-500 hover:text-slate-300'}`}>
+          <button onClick={openLog} className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg text-slate-500 hover:text-slate-300">
             <ClipboardList size={14} /> Log
           </button>
         </div>
-
-        {/* Activity log */}
-        {showLog && (
-          <div className="mt-3 bg-slate-950 rounded-lg p-3">
-            {loadingLog && <div className="text-slate-500 text-xs">Loading…</div>}
-            {!loadingLog && activity.length === 0 && <div className="text-slate-600 text-xs">No activity yet.</div>}
-            {!loadingLog && activity.length > 0 && (
-              <div className="flex flex-col gap-2 max-h-40 overflow-auto">
-                {activity.map((e, i) => (
-                  <div key={i} className="flex gap-2 text-xs">
-                    <div className="text-slate-600 whitespace-nowrap shrink-0 w-24">{e.timestamp}</div>
-                    <div className="text-slate-400 shrink-0 w-16">{ACTION_LABELS[e.action] || e.action}</div>
-                    <div className="text-slate-300">{e.notes || e.status || '—'}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
       </div>
+
+      {/* Log popup */}
+      {logOpen && (
+        <div className="fixed inset-0 z-[1000] bg-black/60 flex items-end sm:items-center justify-center p-4" onClick={() => setLogOpen(false)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md max-h-[70vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+              <div className="text-white font-semibold text-sm">Activity log</div>
+              <button onClick={() => setLogOpen(false)} className="text-slate-500 hover:text-slate-300 p-1"><X size={18} /></button>
+            </div>
+            <div className="text-slate-500 text-xs px-4 pt-2">{lead.address}</div>
+            <div className="flex-1 overflow-auto p-4 flex flex-col gap-3">
+              {loadingLog && <div className="text-slate-500 text-xs">Loading…</div>}
+              {!loadingLog && activity.length === 0 && <div className="text-slate-600 text-sm">No activity recorded yet.</div>}
+              {!loadingLog && activity.map((e, i) => (
+                <div key={i} className="border-b border-slate-800 pb-2 last:border-0">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-slate-300 font-medium">{ACTION_LABELS[e.action] || e.action}</span>
+                    <span className="text-slate-600">{e.timestamp}</span>
+                  </div>
+                  <div className="text-slate-500 text-xs mt-0.5">{repName(e.rep_id)}</div>
+                  {(e.notes || e.status) && <div className="text-slate-300 text-sm mt-1 whitespace-pre-wrap">{e.notes || e.status}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
