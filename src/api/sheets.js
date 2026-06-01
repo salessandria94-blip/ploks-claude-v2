@@ -68,7 +68,3 @@ export async function unassignLead(leadId) {
 export async function updateLeadProfile(leadId, fields) {
   return call('updateLeadProfile', { leadId, fields })
 }
-
-export async function getZipList() {
-  return call('getZipList', {})
-}
