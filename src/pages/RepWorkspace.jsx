@@ -17,8 +17,8 @@ const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
 const ACTION_LABELS = {
   admin_assign: 'Assigned', admin_unassign: 'Unassigned', status_update: 'Status changed',
-  claim: 'Claimed', bulk_claim: 'Claimed', bulk_unassign: 'Released',
-  note: 'Note', auto_recycle: 'Recycled', event: 'Event',
+  claim: 'Claimed', bulk_claim: 'Claimed', unassign: 'Unassigned', bulk_unassign: 'Released',
+  note: 'Note', edit: 'Edited', auto_recycle: 'Recycled', event: 'Event',
 }
 
 function relationOf(lead, repId) {
