@@ -5,14 +5,15 @@ import LeadsPage from './pages/LeadsPage.jsx'
 import MapPage from './pages/MapPage.jsx'
 import RepsPage from './pages/RepsPage.jsx'
 import ActivityPage from './pages/ActivityPage.jsx'
-import FieldView from './pages/FieldView.jsx'
+import RepWorkspace from './pages/RepWorkspace.jsx'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         {/* Field rep routes — no admin shell, full screen */}
-        <Route path="/field/:repSlug" element={<FieldView />} />
+        <Route path="/field" element={<RepWorkspace />} />
+        <Route path="/field/:repSlug" element={<RepWorkspace />} />
 
         {/* Admin routes — with sidebar/shell */}
         <Route element={<AdminLayout />}>

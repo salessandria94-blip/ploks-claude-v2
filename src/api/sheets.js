@@ -33,12 +33,12 @@ export async function getLeadsForRep(repId) {
   return call('getLeadsForRep', { repId })
 }
 
-export async function claimLead(leadId, repId, location) {
-  return call('claimLead', { leadId, repId, location })
+export async function claimLead(leadId, repId, repName, location) {
+  return call('claimLead', { leadId, repId, repName, location })
 }
 
-export async function updateLeadStatus(leadId, status, notes) {
-  return call('updateLeadStatus', { leadId, status, notes })
+export async function updateLeadStatus(leadId, status, notes, repId) {
+  return call('updateLeadStatus', { leadId, status, notes, repId })
 }
 
 export async function logActivity(entry) {
