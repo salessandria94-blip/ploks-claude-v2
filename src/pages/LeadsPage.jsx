@@ -212,7 +212,7 @@ export default function LeadsPage() {
     setLeads([])
     setExpandedId(null)
     try {
-      const res = await getAllLeads({ zip })
+      const res = await getAllLeads(zip)
       setLeads(res.leads || [])
     } catch (err) {
       setError('Failed to load leads: ' + err.message)
