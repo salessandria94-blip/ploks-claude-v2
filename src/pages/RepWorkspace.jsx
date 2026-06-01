@@ -433,7 +433,7 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, onClose, onClaim, onRelea
             </div>
             <div className="text-xs mt-1">
               {rel === 'mine' && <span className="text-green-400">Mine{lead.status ? ` · ${lead.status}` : ''}</span>}
-              {rel === 'others' && <span className="text-orange-400">Claimed by {lead.assigned_rep}</span>}
+              {rel === 'others' && <span className="text-orange-400">Claimed by {lead.assigned_rep}{lead.status ? ` · ${lead.status}` : ''}</span>}
               {rel === 'open' && <span className="text-blue-400">Open</span>}
             </div>
           </div>
