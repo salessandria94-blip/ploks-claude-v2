@@ -56,8 +56,8 @@ export async function claimLead(leadId, repId, repName, location, zip) {
   return call('claimLead', { leadId, repId, repName, location, zip })
 }
 
-export async function updateLeadStatus(leadId, status, notes, repId) {
-  return call('updateLeadStatus', { leadId, status, notes, repId })
+export async function updateLeadStatus(leadId, status, notes, repId, zip) {
+  return call('updateLeadStatus', { leadId, status, notes, repId, zip })
 }
 
 export async function logActivity(entry) {

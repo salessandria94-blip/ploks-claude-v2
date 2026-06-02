@@ -216,7 +216,7 @@ function RepMap({ rep, active }) {
   async function setStatus(lead, status) {
     setBusy(lead.id)
     try {
-      await updateLeadStatus(lead.id, status, '', rep.id)
+      await updateLeadStatus(lead.id, status, '', rep.id, lead.zip)
       patchLead(lead.id, { status })
     } catch (err) { alert(err.message) } finally { setBusy(null) }
   }
@@ -607,7 +607,7 @@ function RepLeads({ rep, active }) {
 
   async function onStatus(lead, status) {
     setBusy(lead.id)
-    try { await updateLeadStatus(lead.id, status, '', rep.id); patchLead(lead.id, { status }) }
+    try { await updateLeadStatus(lead.id, status, '', rep.id, lead.zip); patchLead(lead.id, { status }) }
     catch (e) { alert(e.message) } finally { setBusy(null) }
   }
   async function onSave(lead, fields) { await updateLeadProfile(lead.id, fields, rep.id); patchLead(lead.id, fields) }
