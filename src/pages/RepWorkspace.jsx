@@ -7,11 +7,11 @@ import {
   COLOR_OPEN, COLOR_OTHERS, COLOR_MINE, COLOR_SELECTED,
 } from '../components/mapTools.jsx'
 import {
-  validatePin, getAllReps, getZipList, getAllLeads, claimLead, unassignLead,
+  validatePin, getAllReps, getZipList, getAllLeads, getLeadsForRep, claimLead, unassignLead,
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
   claimLeadsBulk, unassignLeadsBulk,
 } from '../api/sheets.js'
-import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList } from 'lucide-react'
+import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
@@ -36,6 +36,31 @@ function openNavigate(lead) {
   const addr = encodeURIComponent(`${lead.address} ${lead.zip}`)
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
   window.open(isIOS ? `maps://?q=${addr}` : `https://maps.google.com/?q=${addr}`, '_blank')
+}
+
+// ── Lifecycle helpers (client-side, from the timestamps the API returns) ──────
+const DAY_MS = 86400000
+function daysSince(ts) { return ts ? (Date.now() - new Date(ts).getTime()) / DAY_MS : null }
+// Contacted for 30–90 days = sitting in follow-up.
+function isFollowup(l) {
+  if ((l.status || '').toLowerCase() !== 'contacted') return false
+  const d = daysSince(l.status_changed_at)
+  return d != null && d > 30 && d <= 90
+}
+// No-Contact claims auto-release at 7 days; surface how many remain.
+function expiresInDays(l) {
+  const s = (l.status || '').toLowerCase()
+  if (s && s !== 'no contact') return null
+  const d = daysSince(l.claimed_at)
+  if (d == null) return null
+  return Math.max(0, Math.ceil(7 - d))
+}
+function statusBadgeClass(s) {
+  const u = (s || '').toLowerCase()
+  if (u === 'closed') return 'bg-green-900 text-green-300'
+  if (u === 'working') return 'bg-yellow-900 text-yellow-300'
+  if (u === 'contacted') return 'bg-blue-900 text-blue-300'
+  return 'bg-slate-700 text-slate-300'
 }
 
 // ── Login ─────────────────────────────────────────────────────────────────
@@ -379,7 +404,7 @@ function ProfileField({ label, value, onChange, placeholder, disabled }) {
   )
 }
 
-function RepLeadProfile({ lead, rel, reps, meId, busy, onClose, onClaim, onRelease, onStatus, onSave, onTransfer, onNavigate }) {
+function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClose, onClaim, onRelease, onStatus, onSave, onTransfer, onNavigate }) {
   const editable = rel === 'open' || rel === 'mine'
   const transferReps = reps.filter(r => r.id !== meId)
   const [form, setForm] = useState({ owner_name: '', phone: '', email: '', insurance: '', notes: '' })
@@ -422,7 +447,12 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, onClose, onClaim, onRelea
   const repName = id => (reps.find(r => r.id === id) || {}).name || id || 'System'
 
   return (
-    <div className="shrink-0 border-t border-slate-700 bg-slate-900 overflow-auto" style={{ maxHeight: '55vh' }}>
+    <div
+      className={variant === 'full'
+        ? 'h-full overflow-auto bg-slate-900'
+        : 'shrink-0 border-t border-slate-700 bg-slate-900 overflow-auto'}
+      style={variant === 'full' ? undefined : { maxHeight: '55vh' }}
+    >
       <div className="p-4">
         {/* Header */}
         <div className="flex justify-between items-start mb-3">
@@ -546,6 +576,121 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, onClose, onClaim, onRelea
   )
 }
 
+// ── Leads tab ────────────────────────────────────────────────────────────────
+
+function RepLeads({ rep, active }) {
+  const [leads, setLeads] = useState([])
+  const [reps, setReps] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState('')
+  const [sub, setSub] = useState('active') // active | followup | all
+  const [openLead, setOpenLead] = useState(null)
+  const [busy, setBusy] = useState(null)
+
+  async function load() {
+    setLoading(true); setError('')
+    try {
+      const [lr, rr] = await Promise.all([getLeadsForRep(rep.id), getAllReps()])
+      setLeads(lr.leads || [])
+      setReps(rr.reps || [])
+    } catch (e) { setError(e.message) } finally { setLoading(false) }
+  }
+  // Load the first time the tab is opened, then keep it mounted.
+  useEffect(() => { if (active && !loaded) { setLoaded(true); load() } }, [active, loaded]) // eslint-disable-line
+
+  function patchLead(id, patch) {
+    setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)))
+    setOpenLead(prev => (prev && prev.id === id ? { ...prev, ...patch } : prev))
+  }
+  function removeLead(id) { setLeads(prev => prev.filter(l => l.id !== id)); setOpenLead(null) }
+
+  async function onStatus(lead, status) {
+    setBusy(lead.id)
+    try { await updateLeadStatus(lead.id, status, '', rep.id); patchLead(lead.id, { status }) }
+    catch (e) { alert(e.message) } finally { setBusy(null) }
+  }
+  async function onSave(lead, fields) { await updateLeadProfile(lead.id, fields, rep.id); patchLead(lead.id, fields) }
+  async function onRelease(lead) {
+    setBusy(lead.id)
+    try { await unassignLead(lead.id); removeLead(lead.id) }
+    catch (e) { alert(e.message) } finally { setBusy(null) }
+  }
+  async function onTransfer(lead, toRep) {
+    setBusy(lead.id)
+    try { await assignLead(lead.id, toRep.id, toRep.name); removeLead(lead.id) }
+    catch (e) { alert(e.message) } finally { setBusy(null) }
+  }
+
+  const followupCount = leads.filter(isFollowup).length
+  const list = sub === 'followup' ? leads.filter(isFollowup)
+    : sub === 'all' ? leads
+    : leads.filter(l => !isFollowup(l))
+
+  if (openLead) {
+    return (
+      <RepLeadProfile
+        variant="full"
+        lead={openLead}
+        rel="mine"
+        reps={reps}
+        meId={rep.id}
+        busy={busy === openLead.id}
+        onClose={() => setOpenLead(null)}
+        onClaim={() => {}}
+        onRelease={() => onRelease(openLead)}
+        onStatus={s => onStatus(openLead, s)}
+        onSave={fields => onSave(openLead, fields)}
+        onTransfer={r => onTransfer(openLead, r)}
+        onNavigate={() => openNavigate(openLead)}
+      />
+    )
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900 shrink-0">
+        {['active', 'followup', 'all'].map(s => (
+          <button key={s} onClick={() => setSub(s)}
+            className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${sub === s ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
+            {s === 'active' ? 'Active' : s === 'followup' ? `Follow-up${followupCount ? ` (${followupCount})` : ''}` : 'All'}
+          </button>
+        ))}
+        <button onClick={load} disabled={loading} className="ml-auto text-slate-400 hover:text-slate-200">
+          <RefreshCw size={15} className={loading ? 'animate-spin text-blue-400' : ''} />
+        </button>
+      </div>
+
+      {error && <div className="text-red-400 text-xs px-3 py-1.5 bg-red-950/30 shrink-0">{error}</div>}
+
+      <div className="flex-1 overflow-auto">
+        {loading && <div className="text-slate-400 text-sm p-4">Loading your leads…</div>}
+        {!loading && list.length === 0 && (
+          <div className="text-center py-16 text-slate-500 text-sm">
+            {sub === 'followup' ? 'No follow-ups right now.' : 'No leads yet — claim some on the Map.'}
+          </div>
+        )}
+        {!loading && list.map(lead => {
+          const exp = expiresInDays(lead)
+          return (
+            <button key={lead.id} onClick={() => setOpenLead(lead)}
+              className="w-full text-left px-4 py-3 border-b border-slate-800/60 hover:bg-slate-800/40 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-slate-100 text-sm font-medium truncate">{lead.address}</div>
+                <div className="text-slate-500 text-xs mt-0.5">ZIP {lead.zip}{lead.owner_name ? ` · ${lead.owner_name}` : ''}</div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {exp != null && exp <= 2 && <span className="text-[11px] text-amber-400 whitespace-nowrap">⚠ {exp}d</span>}
+                <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${statusBadgeClass(lead.status)}`}>{lead.status || 'No Contact'}</span>
+              </div>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // ── Placeholder tabs ─────────────────────────────────────────────────────────
 
 function Placeholder({ title, lines }) {
@@ -617,8 +762,10 @@ export default function RepWorkspace() {
         <div className={tab === 'map' ? 'h-full' : 'hidden'}>
           <RepMap rep={rep} active={tab === 'map'} />
         </div>
+        <div className={tab === 'leads' ? 'h-full' : 'hidden'}>
+          <RepLeads rep={rep} active={tab === 'leads'} />
+        </div>
         {tab === 'dashboard' && <Placeholder title="Home" lines="Your cards land here next: Claims X/500, Expiring soon, Follow-ups, Pipeline." />}
-        {tab === 'leads' && <Placeholder title="My Leads" lines="Your claimed leads — with status, follow-ups, transfer and unassign — ship in the next build." />}
         {tab === 'docs' && <Placeholder title="Documents" lines="Upload and access your documents here (coming soon)." />}
         {tab === 'calendar' && <Placeholder title="Calendar" lines="Reminders and follow-up due dates will show here (coming soon)." />}
       </div>
