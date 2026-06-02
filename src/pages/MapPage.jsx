@@ -411,7 +411,7 @@ export default function MapPage() {
   async function handleAssign(lead, rep) {
     setBusy(lead.id)
     try {
-      await assignLead(lead.id, rep.id, rep.name)
+      await assignLead(lead.id, rep.id, rep.name, lead.zip)
       patchLead(lead.id, { assigned_rep: rep.name, assigned_rep_id: rep.id })
     } catch (err) {
       alert('Assign failed: ' + err.message)
@@ -423,7 +423,7 @@ export default function MapPage() {
   async function handleUnassign(lead) {
     setBusy(lead.id)
     try {
-      await unassignLead(lead.id)
+      await unassignLead(lead.id, lead.zip)
       patchLead(lead.id, { assigned_rep: '', assigned_rep_id: '' })
     } catch (err) {
       alert('Unassign failed: ' + err.message)
@@ -440,7 +440,7 @@ export default function MapPage() {
     let ok = 0
     await Promise.allSettled(targets.map(async lead => {
       try {
-        await assignLead(lead.id, rep.id, rep.name)
+        await assignLead(lead.id, rep.id, rep.name, lead.zip)
         patchLead(lead.id, { assigned_rep: rep.name, assigned_rep_id: rep.id })
         ok++
       } finally {

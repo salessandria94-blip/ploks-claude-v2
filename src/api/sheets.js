@@ -76,12 +76,12 @@ export async function getAllReps() {
   return call('getAllReps', {})
 }
 
-export async function assignLead(leadId, repId, repName) {
-  return call('assignLead', { leadId, repId, repName })
+export async function assignLead(leadId, repId, repName, zip) {
+  return call('assignLead', { leadId, repId, repName, zip })
 }
 
-export async function unassignLead(leadId) {
-  return call('unassignLead', { leadId })
+export async function unassignLead(leadId, zip) {
+  return call('unassignLead', { leadId, zip })
 }
 
 export async function claimLeadsBulk(leadIds, repId, repName, zip) {

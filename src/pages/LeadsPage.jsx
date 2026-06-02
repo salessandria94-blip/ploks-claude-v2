@@ -287,7 +287,7 @@ export default function LeadsPage() {
   async function handleAssign(lead, rep) {
     setAssigning(lead.id)
     try {
-      await assignLead(lead.id, rep.id, rep.name)
+      await assignLead(lead.id, rep.id, rep.name, lead.zip)
       setLeads(prev => prev.map(l =>
         l.id === lead.id ? { ...l, assigned_rep: rep.name, assigned_rep_id: rep.id } : l
       ))
@@ -301,7 +301,7 @@ export default function LeadsPage() {
   async function handleUnassign(lead) {
     setAssigning(lead.id)
     try {
-      await unassignLead(lead.id)
+      await unassignLead(lead.id, lead.zip)
       setLeads(prev => prev.map(l =>
         l.id === lead.id ? { ...l, assigned_rep: '', assigned_rep_id: '' } : l
       ))

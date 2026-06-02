@@ -209,7 +209,7 @@ function RepMap({ rep, active }) {
   async function releaseOne(lead) {
     setBusy(lead.id)
     try {
-      await unassignLead(lead.id)
+      await unassignLead(lead.id, lead.zip)
       patchLead(lead.id, { assigned_rep: '', assigned_rep_id: '', status: '' })
     } catch (err) { alert(err.message) } finally { setBusy(null) }
   }
@@ -228,7 +228,7 @@ function RepMap({ rep, active }) {
   async function transfer(lead, toRep) {
     setBusy(lead.id)
     try {
-      await assignLead(lead.id, toRep.id, toRep.name)
+      await assignLead(lead.id, toRep.id, toRep.name, lead.zip)
       patchLead(lead.id, { assigned_rep: toRep.name, assigned_rep_id: toRep.id })
       setSelectedLead(null)
     } catch (err) { alert(err.message) } finally { setBusy(null) }
@@ -613,12 +613,12 @@ function RepLeads({ rep, active }) {
   async function onSave(lead, fields) { await updateLeadProfile(lead.id, fields, rep.id); patchLead(lead.id, fields) }
   async function onRelease(lead) {
     setBusy(lead.id)
-    try { await unassignLead(lead.id); removeLead(lead.id) }
+    try { await unassignLead(lead.id, lead.zip); removeLead(lead.id) }
     catch (e) { alert(e.message) } finally { setBusy(null) }
   }
   async function onTransfer(lead, toRep) {
     setBusy(lead.id)
-    try { await assignLead(lead.id, toRep.id, toRep.name); removeLead(lead.id) }
+    try { await assignLead(lead.id, toRep.id, toRep.name, lead.zip); removeLead(lead.id) }
     catch (e) { alert(e.message) } finally { setBusy(null) }
   }
 
