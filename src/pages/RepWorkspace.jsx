@@ -158,7 +158,7 @@ function MapResizer({ active, panelOpen }) {
   return null
 }
 
-function RepMap({ rep, active }) {
+function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) {
   const [zips, setZips] = useState([])
   const [reps, setReps] = useState([])
   const [selectedZip, setSelectedZip] = useState('')
@@ -217,6 +217,12 @@ function RepMap({ rep, active }) {
     [nearMe, repPos, geoLeads]
   )
   const panelOpen = !!selectedLead && selectedLeads.length === 0
+  // How many of the rep's own leads are in each ZIP (for the dropdown labels).
+  const countByZip = useMemo(() => {
+    const m = {}
+    ;(myLeads || []).forEach(l => { m[l.zip] = (m[l.zip] || 0) + 1 })
+    return m
+  }, [myLeads])
 
   async function loadZip(zip) {
     setSelectedZip(zip)
@@ -248,7 +254,9 @@ function RepMap({ rep, active }) {
     setBusy(lead.id)
     try {
       await claimLead(lead.id, rep.id, rep.name, null, lead.zip)
-      patchLead(lead.id, { assigned_rep: rep.name, assigned_rep_id: rep.id, status: lead.status || 'No Contact' })
+      const patch = { assigned_rep: rep.name, assigned_rep_id: rep.id, status: lead.status || 'No Contact' }
+      patchLead(lead.id, patch)
+      onMineAdd({ ...lead, ...patch })
     } catch (err) { alert(err.message) } finally { setBusy(null) }
   }
   async function releaseOne(lead) {
@@ -256,6 +264,7 @@ function RepMap({ rep, active }) {
     try {
       await unassignLead(lead.id, lead.zip)
       patchLead(lead.id, { assigned_rep: '', assigned_rep_id: '', status: '' })
+      onMineRemove(lead.id)
     } catch (err) { alert(err.message) } finally { setBusy(null) }
   }
   async function setStatus(lead, status) {
@@ -263,18 +272,21 @@ function RepMap({ rep, active }) {
     try {
       await updateLeadStatus(lead.id, status, '', rep.id, lead.zip)
       patchLead(lead.id, { status })
+      onMinePatch(lead.id, { status })
     } catch (err) { alert(err.message) } finally { setBusy(null) }
   }
   async function saveProfile(lead, fields) {
     // notes is the current value (replace); a stamped snapshot is logged server-side
     await updateLeadProfile(lead.id, fields, rep.id)
     patchLead(lead.id, fields)
+    onMinePatch(lead.id, fields)
   }
   async function transfer(lead, toRep) {
     setBusy(lead.id)
     try {
       await assignLead(lead.id, toRep.id, toRep.name, lead.zip)
       patchLead(lead.id, { assigned_rep: toRep.name, assigned_rep_id: toRep.id })
+      onMineRemove(lead.id)
       setSelectedLead(null)
     } catch (err) { alert(err.message) } finally { setBusy(null) }
   }
@@ -287,6 +299,7 @@ function RepMap({ rep, active }) {
       setLeads(prev => prev.map(l => (claimed.has(l.id)
         ? { ...l, assigned_rep: rep.name, assigned_rep_id: rep.id, status: l.status || 'No Contact' }
         : l)))
+      targets.forEach(l => { if (claimed.has(l.id)) onMineAdd({ ...l, assigned_rep: rep.name, assigned_rep_id: rep.id, status: l.status || 'No Contact' }) })
       const failed = targets.length - claimed.size
       if (failed > 0) setError(`${claimed.size} claimed, ${failed} skipped (already taken or cap).`)
     } catch (err) { setError(err.message) }
@@ -300,6 +313,7 @@ function RepMap({ rep, active }) {
       setLeads(prev => prev.map(l => (released.has(l.id)
         ? { ...l, assigned_rep: '', assigned_rep_id: '', status: '' }
         : l)))
+      released.forEach(id => onMineRemove(id))
     } catch (err) { setError(err.message) }
     finally { setBulkBusy(false); setSelectedLeads([]) }
   }
@@ -319,7 +333,7 @@ function RepMap({ rep, active }) {
           className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 flex-1 focus:outline-none focus:border-blue-500"
         >
           <option value="">Select a ZIP…</option>
-          {zips.map(z => <option key={z} value={z}>{z}</option>)}
+          {zips.map(z => <option key={z} value={z}>{z}{countByZip[z] ? ` (${countByZip[z]})` : ''}</option>)}
         </select>
         {loading && <Loader2 size={16} className="animate-spin text-blue-400" />}
         {selectedZip && !loading && (
@@ -882,13 +896,14 @@ export default function RepWorkspace() {
     } catch (e) { setMineError(e.message) } finally { setLoadingMine(false) }
   }, [rep])
 
-  // Lazy-load on first visit to Home or Leads, then keep it in memory.
+  // Load once on sign-in (Map ZIP counts + Home + Leads all share it).
   useEffect(() => {
-    if (rep && (tab === 'leads' || tab === 'dashboard') && !mineLoaded) { setMineLoaded(true); loadMine() }
-  }, [rep, tab, mineLoaded, loadMine])
+    if (rep && !mineLoaded) { setMineLoaded(true); loadMine() }
+  }, [rep, mineLoaded, loadMine])
 
   function patchMyLead(id, patch) { setMyLeads(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l))) }
   function removeMyLead(id) { setMyLeads(prev => prev.filter(l => l.id !== id)) }
+  function addMyLead(lead) { setMyLeads(prev => (prev.some(l => l.id === lead.id) ? prev : [...prev, lead])) }
 
   function unlock(r) {
     setRep(r)
@@ -931,7 +946,8 @@ export default function RepWorkspace() {
       {/* Content — the map stays mounted so its ZIP + leads persist across tabs */}
       <div className="flex-1 min-h-0 relative">
         <div className={tab === 'map' ? 'h-full' : 'hidden'}>
-          <RepMap rep={rep} active={tab === 'map'} />
+          <RepMap rep={rep} active={tab === 'map'} myLeads={myLeads}
+            onMineAdd={addMyLead} onMineRemove={removeMyLead} onMinePatch={patchMyLead} />
         </div>
         <div className={tab === 'leads' ? 'h-full' : 'hidden'}>
           <RepLeads
