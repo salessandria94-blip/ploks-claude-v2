@@ -578,47 +578,33 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClos
 
 // ── Leads tab ────────────────────────────────────────────────────────────────
 
-function RepLeads({ rep, active }) {
-  const [leads, setLeads] = useState([])
-  const [reps, setReps] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [loaded, setLoaded] = useState(false)
-  const [error, setError] = useState('')
-  const [sub, setSub] = useState('active') // active | followup | all
+// Controlled by RepWorkspace (leads/reps/loading come from the shared load so
+// the ~slow getLeadsForRep scan happens once per session, reused by Home too).
+function RepLeads({ rep, leads, reps, loading, error, sub, setSub, onReload, onPatch, onRemove }) {
   const [openLead, setOpenLead] = useState(null)
   const [busy, setBusy] = useState(null)
 
-  async function load() {
-    setLoading(true); setError('')
-    try {
-      const [lr, rr] = await Promise.all([getLeadsForRep(rep.id), getAllReps()])
-      setLeads(lr.leads || [])
-      setReps(rr.reps || [])
-    } catch (e) { setError(e.message) } finally { setLoading(false) }
-  }
-  // Load the first time the tab is opened, then keep it mounted.
-  useEffect(() => { if (active && !loaded) { setLoaded(true); load() } }, [active, loaded]) // eslint-disable-line
-
-  function patchLead(id, patch) {
-    setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)))
-    setOpenLead(prev => (prev && prev.id === id ? { ...prev, ...patch } : prev))
-  }
-  function removeLead(id) { setLeads(prev => prev.filter(l => l.id !== id)); setOpenLead(null) }
-
   async function onStatus(lead, status) {
     setBusy(lead.id)
-    try { await updateLeadStatus(lead.id, status, '', rep.id, lead.zip); patchLead(lead.id, { status }) }
-    catch (e) { alert(e.message) } finally { setBusy(null) }
+    try {
+      await updateLeadStatus(lead.id, status, '', rep.id, lead.zip)
+      onPatch(lead.id, { status })
+      setOpenLead(prev => (prev && prev.id === lead.id ? { ...prev, status } : prev))
+    } catch (e) { alert(e.message) } finally { setBusy(null) }
   }
-  async function onSave(lead, fields) { await updateLeadProfile(lead.id, fields, rep.id); patchLead(lead.id, fields) }
+  async function onSave(lead, fields) {
+    await updateLeadProfile(lead.id, fields, rep.id)
+    onPatch(lead.id, fields)
+    setOpenLead(prev => (prev && prev.id === lead.id ? { ...prev, ...fields } : prev))
+  }
   async function onRelease(lead) {
     setBusy(lead.id)
-    try { await unassignLead(lead.id, lead.zip); removeLead(lead.id) }
+    try { await unassignLead(lead.id, lead.zip); onRemove(lead.id); setOpenLead(null) }
     catch (e) { alert(e.message) } finally { setBusy(null) }
   }
   async function onTransfer(lead, toRep) {
     setBusy(lead.id)
-    try { await assignLead(lead.id, toRep.id, toRep.name, lead.zip); removeLead(lead.id) }
+    try { await assignLead(lead.id, toRep.id, toRep.name, lead.zip); onRemove(lead.id); setOpenLead(null) }
     catch (e) { alert(e.message) } finally { setBusy(null) }
   }
 
@@ -656,7 +642,7 @@ function RepLeads({ rep, active }) {
             {s === 'active' ? 'Active' : s === 'followup' ? `Follow-up${followupCount ? ` (${followupCount})` : ''}` : 'All'}
           </button>
         ))}
-        <button onClick={load} disabled={loading} className="ml-auto text-slate-400 hover:text-slate-200">
+        <button onClick={onReload} disabled={loading} className="ml-auto text-slate-400 hover:text-slate-200">
           <RefreshCw size={15} className={loading ? 'animate-spin text-blue-400' : ''} />
         </button>
       </div>
@@ -664,13 +650,13 @@ function RepLeads({ rep, active }) {
       {error && <div className="text-red-400 text-xs px-3 py-1.5 bg-red-950/30 shrink-0">{error}</div>}
 
       <div className="flex-1 overflow-auto">
-        {loading && <div className="text-slate-400 text-sm p-4">Loading your leads…</div>}
+        {loading && leads.length === 0 && <div className="text-slate-400 text-sm p-4">Loading your leads…</div>}
         {!loading && list.length === 0 && (
           <div className="text-center py-16 text-slate-500 text-sm">
             {sub === 'followup' ? 'No follow-ups right now.' : 'No leads yet — claim some on the Map.'}
           </div>
         )}
-        {!loading && list.map(lead => {
+        {list.map(lead => {
           const exp = expiresInDays(lead)
           return (
             <button key={lead.id} onClick={() => setOpenLead(lead)}
@@ -687,6 +673,92 @@ function RepLeads({ rep, active }) {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+// ── Home dashboard ───────────────────────────────────────────────────────────
+
+const REP_CAP = 500
+
+function HomeCard({ children, onClick, className = '' }) {
+  const cls = `text-left rounded-xl p-4 border ${className}`
+  return onClick
+    ? <button onClick={onClick} className={cls}>{children}</button>
+    : <div className={cls}>{children}</div>
+}
+
+function RepHome({ rep, leads, loading, error, onReload, onGoLeads }) {
+  const claims = leads.length
+  const expiring = leads
+    .map(l => ({ l, d: expiresInDays(l) }))
+    .filter(x => x.d != null && x.d <= 2)
+    .sort((a, b) => a.d - b.d)
+  const followups = leads.filter(isFollowup)
+  const pipe = { 'No Contact': 0, Contacted: 0, Working: 0, Closed: 0 }
+  leads.forEach(l => { const s = l.status || 'No Contact'; if (pipe[s] != null) pipe[s]++ })
+  const capPct = Math.min(100, Math.round((claims / REP_CAP) * 100))
+
+  return (
+    <div className="h-full overflow-auto p-4">
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-slate-200 text-base font-semibold">Hi {(rep.name || '').split(' ')[0]} 👋</div>
+        <button onClick={onReload} disabled={loading} className="text-slate-400 hover:text-slate-200">
+          <RefreshCw size={16} className={loading ? 'animate-spin text-blue-400' : ''} />
+        </button>
+      </div>
+
+      {error && <div className="text-red-400 text-sm mb-3">{error}</div>}
+      {loading && leads.length === 0 && <div className="text-slate-400 text-sm mb-3">Loading your numbers…</div>}
+
+      <div className="grid grid-cols-2 gap-3">
+        <HomeCard onClick={() => onGoLeads('all')} className="bg-slate-900 border-slate-800">
+          <div className="text-slate-500 text-xs uppercase tracking-wide">My Claims</div>
+          <div className="text-2xl font-bold text-slate-100 mt-1">{claims}<span className="text-slate-500 text-base font-medium"> / {REP_CAP}</span></div>
+          <div className="h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden"><div className="h-full bg-blue-500" style={{ width: `${capPct}%` }} /></div>
+        </HomeCard>
+
+        <HomeCard onClick={() => onGoLeads('active')} className={expiring.length ? 'bg-amber-950/40 border-amber-800' : 'bg-slate-900 border-slate-800'}>
+          <div className="text-slate-500 text-xs uppercase tracking-wide">Expiring soon</div>
+          <div className={`text-2xl font-bold mt-1 ${expiring.length ? 'text-amber-400' : 'text-slate-100'}`}>{expiring.length}</div>
+          <div className="text-slate-500 text-[11px] mt-1">{expiring.length ? 'Contact or they release' : 'Nothing expiring'}</div>
+        </HomeCard>
+
+        <HomeCard onClick={() => onGoLeads('followup')} className="bg-slate-900 border-slate-800">
+          <div className="text-slate-500 text-xs uppercase tracking-wide">Follow-ups</div>
+          <div className="text-2xl font-bold text-slate-100 mt-1">{followups.length}</div>
+          <div className="text-slate-500 text-[11px] mt-1">Contacted 30+ days</div>
+        </HomeCard>
+
+        <HomeCard className="bg-slate-900 border-slate-800">
+          <div className="text-slate-500 text-xs uppercase tracking-wide mb-2">Pipeline</div>
+          <div className="space-y-1">
+            {STATUSES.map(s => (
+              <div key={s} className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">{s}</span>
+                <span className="text-slate-100 font-medium">{pipe[s]}</span>
+              </div>
+            ))}
+          </div>
+        </HomeCard>
+      </div>
+
+      {expiring.length > 0 && (
+        <div className="mt-4">
+          <div className="text-amber-400 text-xs uppercase tracking-wide mb-2">⚠ Contact soon</div>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl divide-y divide-slate-800 overflow-hidden">
+            {expiring.slice(0, 6).map(({ l, d }) => (
+              <div key={l.id} className="flex items-center justify-between px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="text-slate-100 text-sm truncate">{l.address}</div>
+                  <div className="text-slate-500 text-[11px]">ZIP {l.zip}</div>
+                </div>
+                <span className="text-amber-400 text-xs whitespace-nowrap ml-2">{d}d left</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -718,6 +790,33 @@ export default function RepWorkspace() {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || 'null') } catch { return null }
   })
   const [tab, setTab] = useState('map')
+
+  // Shared "my leads" load — used by BOTH the Leads tab and Home dashboard so
+  // the slow getLeadsForRep scan only runs once per session.
+  const [myLeads, setMyLeads] = useState([])
+  const [reps, setReps] = useState([])
+  const [loadingMine, setLoadingMine] = useState(false)
+  const [mineLoaded, setMineLoaded] = useState(false)
+  const [mineError, setMineError] = useState('')
+  const [leadsSub, setLeadsSub] = useState('active')
+
+  const loadMine = useCallback(async () => {
+    if (!rep) return
+    setLoadingMine(true); setMineError('')
+    try {
+      const [lr, rr] = await Promise.all([getLeadsForRep(rep.id), getAllReps()])
+      setMyLeads(lr.leads || [])
+      setReps(rr.reps || [])
+    } catch (e) { setMineError(e.message) } finally { setLoadingMine(false) }
+  }, [rep])
+
+  // Lazy-load on first visit to Home or Leads, then keep it in memory.
+  useEffect(() => {
+    if (rep && (tab === 'leads' || tab === 'dashboard') && !mineLoaded) { setMineLoaded(true); loadMine() }
+  }, [rep, tab, mineLoaded, loadMine])
+
+  function patchMyLead(id, patch) { setMyLeads(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l))) }
+  function removeMyLead(id) { setMyLeads(prev => prev.filter(l => l.id !== id)) }
 
   function unlock(r) {
     setRep(r)
@@ -763,9 +862,29 @@ export default function RepWorkspace() {
           <RepMap rep={rep} active={tab === 'map'} />
         </div>
         <div className={tab === 'leads' ? 'h-full' : 'hidden'}>
-          <RepLeads rep={rep} active={tab === 'leads'} />
+          <RepLeads
+            rep={rep}
+            leads={myLeads}
+            reps={reps}
+            loading={loadingMine}
+            error={mineError}
+            sub={leadsSub}
+            setSub={setLeadsSub}
+            onReload={loadMine}
+            onPatch={patchMyLead}
+            onRemove={removeMyLead}
+          />
         </div>
-        {tab === 'dashboard' && <Placeholder title="Home" lines="Your cards land here next: Claims X/500, Expiring soon, Follow-ups, Pipeline." />}
+        {tab === 'dashboard' && (
+          <RepHome
+            rep={rep}
+            leads={myLeads}
+            loading={loadingMine}
+            error={mineError}
+            onReload={loadMine}
+            onGoLeads={s => { setLeadsSub(s); setTab('leads') }}
+          />
+        )}
         {tab === 'docs' && <Placeholder title="Documents" lines="Upload and access your documents here (coming soon)." />}
         {tab === 'calendar' && <Placeholder title="Calendar" lines="Reminders and follow-up due dates will show here (coming soon)." />}
       </div>
