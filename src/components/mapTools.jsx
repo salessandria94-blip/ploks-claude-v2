@@ -14,6 +14,14 @@ export const COLOR_OTHERS = '#f97316'   // orange — owned by another rep
 export const COLOR_MINE = '#22c55e'     // green — mine
 export const COLOR_SELECTED = '#facc15' // yellow — selected by lasso/radius
 
+// The rep's own live position — a pulsing blue dot, distinct from lead pins.
+export const repLocationIcon = L.divIcon({
+  className: '',
+  html: `<div style="width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid white;box-shadow:0 0 0 5px rgba(37,99,235,0.30)"></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+})
+
 export function leadIcon(color, selected) {
   const size = selected ? 18 : 14
   const ring = selected

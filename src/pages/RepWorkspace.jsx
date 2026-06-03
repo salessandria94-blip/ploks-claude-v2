@@ -1,9 +1,9 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import {
-  SATELLITE_TILE, JACKSONVILLE_CENTER, leadIcon, FitBounds, CenterOnLead, ClickToClear, DrawTool,
+  SATELLITE_TILE, JACKSONVILLE_CENTER, leadIcon, repLocationIcon, FitBounds, CenterOnLead, ClickToClear, DrawTool,
   COLOR_OPEN, COLOR_OTHERS, COLOR_MINE, COLOR_SELECTED,
 } from '../components/mapTools.jsx'
 import {
@@ -11,7 +11,7 @@ import {
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
   claimLeadsBulk, unassignLeadsBulk,
 } from '../api/sheets.js'
-import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw } from 'lucide-react'
+import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
@@ -165,9 +165,43 @@ function RepMap({ rep, active }) {
   const [tool, setTool] = useState(null)
   const [busy, setBusy] = useState(null)
   const [bulkBusy, setBulkBusy] = useState(false)
+  const [repPos, setRepPos] = useState(null)
+  const [gpsErr, setGpsErr] = useState('')
+  const mapRef = useRef(null)
+  const watchRef = useRef(null)
+  const snappedRef = useRef(false)
 
   useEffect(() => { getZipList().then(r => setZips(r.zips || [])).catch(() => {}) }, [])
   useEffect(() => { getAllReps().then(r => setReps(r.reps || [])).catch(() => {}) }, [])
+
+  function startGps() {
+    if (!navigator.geolocation) { setGpsErr('Location not supported on this device'); return }
+    setGpsErr('')
+    // getCurrentPosition fires the iOS permission prompt; watchPosition keeps it live.
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        setRepPos([pos.coords.latitude, pos.coords.longitude])
+        if (watchRef.current == null) {
+          watchRef.current = navigator.geolocation.watchPosition(
+            p => setRepPos([p.coords.latitude, p.coords.longitude]),
+            () => {},
+            { enableHighAccuracy: true, maximumAge: 5000 }
+          )
+        }
+      },
+      err => setGpsErr(err.code === 1 ? 'Location permission denied' : 'Could not get location'),
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+  function locate() {
+    if (repPos && mapRef.current) mapRef.current.setView(repPos, 17)
+    else startGps()
+  }
+  // Snap to the rep on the first fix; clean up the watch on unmount.
+  useEffect(() => {
+    if (repPos && mapRef.current && !snappedRef.current) { snappedRef.current = true; mapRef.current.setView(repPos, 16) }
+  }, [repPos])
+  useEffect(() => () => { if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current) }, [])
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
   const geoLeads = useMemo(() => leads.filter(l => l.lat && l.lng), [leads])
@@ -288,13 +322,14 @@ function RepMap({ rep, active }) {
 
       {/* Map */}
       <div className="relative flex-1 min-h-0">
-        <MapContainer center={JACKSONVILLE_CENTER} zoom={12} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+        <MapContainer ref={mapRef} center={JACKSONVILLE_CENTER} zoom={12} style={{ height: '100%', width: '100%' }} zoomControl={false}>
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
           <FitBounds leads={geoLeads} />
           <CenterOnLead lead={selectedLead} />
           <MapResizer active={active} panelOpen={panelOpen} />
           <ClickToClear enabled={!tool} onClear={() => { setSelectedLead(null); setSelectedLeads([]) }} />
           <DrawTool tool={tool} leads={geoLeads} onSelect={handleAreaSelect} />
+          {repPos && <Marker position={repPos} icon={repLocationIcon} zIndexOffset={2000} />}
           {geoLeads.map(lead => {
             const rel = relationOf(lead, rep.id)
             const sel = selectedIds.has(lead.id) || (selectedLead && selectedLead.id === lead.id)
@@ -326,7 +361,18 @@ function RepMap({ rep, active }) {
             onClick={() => setTool(t => (t === 'radius' ? null : 'radius'))}
             className={`p-2 rounded-lg border shadow-lg ${tool === 'radius' ? 'bg-yellow-500 border-yellow-400 text-black' : 'bg-slate-900/90 border-slate-700 text-slate-300'}`}
           ><Target size={16} /></button>
+          <button
+            onClick={locate}
+            title={repPos ? 'Center on me' : 'Find my location'}
+            className={`p-2 rounded-lg border shadow-lg ${repPos ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300'}`}
+          ><LocateFixed size={16} /></button>
         </div>
+
+        {gpsErr && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[999] bg-red-900/90 text-red-100 text-xs px-3 py-1.5 rounded-lg shadow-lg">
+            {gpsErr}
+          </div>
+        )}
 
         {tool && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-[999] bg-yellow-900/90 text-yellow-100 text-xs px-3 py-1.5 rounded-lg shadow-lg pointer-events-none">
