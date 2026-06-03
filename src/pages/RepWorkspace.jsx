@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import {
   SATELLITE_TILE, JACKSONVILLE_CENTER, leadIcon, repLocationIcon, FitBounds, CenterOnLead, ClickToClear, DrawTool,
@@ -11,7 +11,7 @@ import {
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
   claimLeadsBulk, unassignLeadsBulk,
 } from '../api/sheets.js'
-import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed } from 'lucide-react'
+import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Radar } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
@@ -36,6 +36,11 @@ function openNavigate(lead) {
   const addr = encodeURIComponent(`${lead.address} ${lead.zip}`)
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
   window.open(isIOS ? `maps://?q=${addr}` : `https://maps.google.com/?q=${addr}`, '_blank')
+}
+
+const NEAR_MILES = 1
+function milesFrom(pos, lat, lng) {
+  return L.latLng(pos[0], pos[1]).distanceTo(L.latLng(lat, lng)) / 1609.34
 }
 
 // ── Lifecycle helpers (client-side, from the timestamps the API returns) ──────
@@ -167,6 +172,7 @@ function RepMap({ rep, active }) {
   const [bulkBusy, setBulkBusy] = useState(false)
   const [repPos, setRepPos] = useState(null)
   const [gpsErr, setGpsErr] = useState('')
+  const [nearMe, setNearMe] = useState(false)
   const mapRef = useRef(null)
   const watchRef = useRef(null)
   const snappedRef = useRef(false)
@@ -205,6 +211,11 @@ function RepMap({ rep, active }) {
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
   const geoLeads = useMemo(() => leads.filter(l => l.lat && l.lng), [leads])
+  // When "near me" is on, only show/operate on leads within 1 mile of the rep.
+  const shownLeads = useMemo(
+    () => (nearMe && repPos ? geoLeads.filter(l => milesFrom(repPos, l.lat, l.lng) <= NEAR_MILES) : geoLeads),
+    [nearMe, repPos, geoLeads]
+  )
   const panelOpen = !!selectedLead && selectedLeads.length === 0
 
   async function loadZip(zip) {
@@ -293,8 +304,8 @@ function RepMap({ rep, active }) {
     finally { setBulkBusy(false); setSelectedLeads([]) }
   }
 
-  const mineCount = geoLeads.filter(l => relationOf(l, rep.id) === 'mine').length
-  const openCount = geoLeads.filter(l => relationOf(l, rep.id) === 'open').length
+  const mineCount = shownLeads.filter(l => relationOf(l, rep.id) === 'mine').length
+  const openCount = shownLeads.filter(l => relationOf(l, rep.id) === 'open').length
   const selOpen = selectedLeads.filter(l => relationOf(l, rep.id) === 'open')
   const selMine = selectedLeads.filter(l => relationOf(l, rep.id) === 'mine')
 
@@ -328,9 +339,13 @@ function RepMap({ rep, active }) {
           <CenterOnLead lead={selectedLead} />
           <MapResizer active={active} panelOpen={panelOpen} />
           <ClickToClear enabled={!tool} onClear={() => { setSelectedLead(null); setSelectedLeads([]) }} />
-          <DrawTool tool={tool} leads={geoLeads} onSelect={handleAreaSelect} />
+          <DrawTool tool={tool} leads={shownLeads} onSelect={handleAreaSelect} />
+          {nearMe && repPos && (
+            <Circle center={repPos} radius={NEAR_MILES * 1609.34}
+              pathOptions={{ color: '#2563eb', weight: 1, fillColor: '#2563eb', fillOpacity: 0.06 }} />
+          )}
           {repPos && <Marker position={repPos} icon={repLocationIcon} zIndexOffset={2000} />}
-          {geoLeads.map(lead => {
+          {shownLeads.map(lead => {
             const rel = relationOf(lead, rep.id)
             const sel = selectedIds.has(lead.id) || (selectedLead && selectedLead.id === lead.id)
             return (
@@ -366,7 +381,18 @@ function RepMap({ rep, active }) {
             title={repPos ? 'Center on me' : 'Find my location'}
             className={`p-2 rounded-lg border shadow-lg ${repPos ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300'}`}
           ><LocateFixed size={16} /></button>
+          <button
+            onClick={() => { if (!repPos) { setNearMe(true); startGps() } else { setNearMe(v => !v); locate() } }}
+            title="Leads within 1 mile of me"
+            className={`p-2 rounded-lg border shadow-lg ${nearMe ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300'}`}
+          ><Radar size={16} /></button>
         </div>
+
+        {nearMe && repPos && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[999] bg-blue-900/90 text-blue-100 text-xs px-3 py-1.5 rounded-lg shadow-lg pointer-events-none">
+            {shownLeads.length} lead{shownLeads.length === 1 ? '' : 's'} within 1 mile
+          </div>
+        )}
 
         {gpsErr && (
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[999] bg-red-900/90 text-red-100 text-xs px-3 py-1.5 rounded-lg shadow-lg">
