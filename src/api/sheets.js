@@ -108,3 +108,9 @@ export async function getRepStats() {
   return call('getRepStats', {})
 }
 
+export async function getLeadsNearPin(lat, lng, radiusMiles = 2) {
+  // Cross-ZIP geo-search — scans all 24 ZIP sheets via the Sheets API.
+  // Expect ~5–15s on the first call; give it a longer leash.
+  return call('getLeadsNearPin', { lat, lng, radiusMiles }, 0, 40000)
+}
+
