@@ -147,21 +147,25 @@ export async function claimLead(leadId, repId, repName, location, zip) {
 
 export async function claimLeadsBulk(leadIds, repId, repName, zip) {
   const now = new Date().toISOString()
-  const { data, error } = await supabase
-    .from('leads')
-    .update({
-      assigned_rep:     repName || repId,
-      assigned_rep_id:  repId,
-      assigned_week:    now.slice(0, 10),
-      status:           'No Contact',
-      claimed_at:       now,
-      status_changed_at: now,
-    })
-    .in('id', leadIds)
-    .is('assigned_rep_id', null)
-    .select('id')
-  if (error) throw new Error(error.message)
-  const claimed = (data || []).map(r => r.id)
+  const CHUNK = 100
+  const claimed = []
+  for (let i = 0; i < leadIds.length; i += CHUNK) {
+    const { data, error } = await supabase
+      .from('leads')
+      .update({
+        assigned_rep:      repName || repId,
+        assigned_rep_id:   repId,
+        assigned_week:     now.slice(0, 10),
+        status:            'No Contact',
+        claimed_at:        now,
+        status_changed_at: now,
+      })
+      .in('id', leadIds.slice(i, i + CHUNK))
+      .is('assigned_rep_id', null)
+      .select('id')
+    if (error) throw new Error(error.message)
+    claimed.push(...(data || []).map(r => r.id))
+  }
   if (claimed.length) {
     await supabase.from('activity_log').insert(
       claimed.map(id => ({ action: 'bulk_claim', lead_id: id, rep_id: repId }))
@@ -188,21 +192,25 @@ export async function unassignLead(leadId, zip) {
 }
 
 export async function unassignLeadsBulk(leadIds, repId, zip) {
-  const { data, error } = await supabase
-    .from('leads')
-    .update({
-      assigned_rep:     null,
-      assigned_rep_id:  null,
-      assigned_week:    null,
-      status:           'No Contact',
-      claimed_at:       null,
-      status_changed_at: null,
-    })
-    .in('id', leadIds)
-    .eq('assigned_rep_id', repId)
-    .select('id')
-  if (error) throw new Error(error.message)
-  const released = (data || []).map(r => r.id)
+  const CHUNK = 100
+  const released = []
+  for (let i = 0; i < leadIds.length; i += CHUNK) {
+    const { data, error } = await supabase
+      .from('leads')
+      .update({
+        assigned_rep:      null,
+        assigned_rep_id:   null,
+        assigned_week:     null,
+        status:            'No Contact',
+        claimed_at:        null,
+        status_changed_at: null,
+      })
+      .in('id', leadIds.slice(i, i + CHUNK))
+      .eq('assigned_rep_id', repId)
+      .select('id')
+    if (error) throw new Error(error.message)
+    released.push(...(data || []).map(r => r.id))
+  }
   if (released.length) {
     await supabase.from('activity_log').insert(
       released.map(id => ({ action: 'bulk_unassign', lead_id: id, rep_id: repId }))
