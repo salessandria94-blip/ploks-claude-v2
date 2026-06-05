@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-lea
 import L from 'leaflet'
 import { getZipList, getAllReps, getAllLeads, assignLead, unassignLead, updateLeadProfile, getLeadActivity } from '../api/sheets.js'
 import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList } from 'lucide-react'
+import AddressSearch from '../components/AddressSearch.jsx'
 
 const SATELLITE_TILE = {
   url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -40,6 +41,15 @@ function pointInPolygon(pt, poly) {
 }
 
 // ── Map helpers ──────────────────────────────────────────────────────────────
+
+// Fly to geocoded address
+function FlyToLocation({ coords }) {
+  const map = useMap()
+  useEffect(() => {
+    if (coords) map.flyTo(coords, 17)
+  }, [coords, map])
+  return null
+}
 
 // Fit map to all leads when the loaded set grows (not on selection changes)
 function FitBounds({ leads }) {
@@ -412,6 +422,7 @@ export default function MapPage() {
   const [error, setError] = useState('')
   const [loadingAll, setLoadingAll] = useState(false)
   const [allProgress, setAllProgress] = useState([0, 0])
+  const [flyTarget, setFlyTarget] = useState(null)
 
   useEffect(() => {
     async function loadMeta() {
@@ -568,14 +579,15 @@ export default function MapPage() {
       {/* Top bar */}
       <div className="px-4 py-3 border-b border-slate-800 bg-slate-900 shrink-0">
         <div className="flex items-center justify-between mb-3">
-          <div>
-            <h1 className="text-xl font-bold text-slate-100">Map</h1>
-            {leads.length > 0 && (
-              <p className="text-slate-400 text-xs mt-0.5">
-                {leads.length} leads · <span className="text-blue-400">{unassignedCount} open</span> · <span className="text-orange-400">{assignedCount} assigned</span>
-              </p>
-            )}
+          <div className="flex items-center gap-3">
+            <h1 className="text-xl font-bold text-slate-100 shrink-0">Map</h1>
+            <AddressSearch onResult={setFlyTarget} compact />
           </div>
+          {leads.length > 0 && (
+            <p className="text-slate-400 text-xs mt-0.5 ml-1">
+              {leads.length} leads · <span className="text-blue-400">{unassignedCount} open</span> · <span className="text-orange-400">{assignedCount} assigned</span>
+            </p>
+          )}
           <div className="flex items-center gap-2">
             {loadingAll && (
               <span className="text-xs text-blue-400 flex items-center gap-1.5">
@@ -628,6 +640,7 @@ export default function MapPage() {
       <div className="relative flex-1 min-h-0">
         <MapContainer center={JACKSONVILLE_CENTER} zoom={11} style={{ height: '100%', width: '100%' }} zoomControl={false}>
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
+          <FlyToLocation coords={flyTarget} />
           <FitBounds leads={leads} />
           <CenterAndResize focusLead={selectedLead} panelOpen={panelOpen} />
           <ClickToClear enabled={!tool} onClear={clearSelection} />

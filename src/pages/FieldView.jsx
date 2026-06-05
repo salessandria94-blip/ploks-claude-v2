@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import { Navigation, CheckCircle, MapPin, X, RefreshCw } from 'lucide-react'
+import AddressSearch from '../components/AddressSearch.jsx'
 
 const SATELLITE_TILE = { url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', attribution: '© ESRI' }
 import L from 'leaflet'
@@ -30,6 +31,14 @@ const repIcon = L.divIcon({
   iconSize: [18, 18],
   iconAnchor: [9, 9],
 })
+
+function FlyToLocation({ coords }) {
+  const map = useMap()
+  useEffect(() => {
+    if (coords) map.flyTo(coords, 17)
+  }, [coords, map])
+  return null
+}
 
 function RepDot({ position }) {
   if (!position) return null
@@ -180,6 +189,7 @@ export default function FieldView() {
   const [selectedLead, setSelectedLead] = useState(null)
   const [claiming, setClaiming] = useState(false)
   const [tab, setTab] = useState('map')
+  const [flyTarget, setFlyTarget] = useState(null)
   const watchRef = useRef(null)
 
   function startGps() {
@@ -288,6 +298,7 @@ export default function FieldView() {
             zoomControl={false}
           >
             <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
+            <FlyToLocation coords={flyTarget} />
             <RepDot position={repPos} />
             <LocationButton position={repPos} onEnableGps={startGps} />
             <MapClickCapture onMapClick={() => setSelectedLead(null)} />
@@ -304,6 +315,11 @@ export default function FieldView() {
               </Marker>
             ))}
           </MapContainer>
+
+          {/* Address search overlay */}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] w-64">
+            <AddressSearch onResult={setFlyTarget} />
+          </div>
 
           <div className="absolute top-3 left-3 z-[999] bg-slate-900/90 rounded-lg px-3 py-2 text-xs text-slate-300 space-y-1 pointer-events-none">
             <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full bg-blue-500 inline-block" /> Available</div>
