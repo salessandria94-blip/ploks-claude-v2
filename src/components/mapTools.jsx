@@ -136,11 +136,11 @@ export function DrawTool({ tool, leads, onSelect }) {
         const poly = points.map(p => [p.lat, p.lng])
         clearLayer()
         layer = L.polygon(poly, { color: COLOR_SELECTED, weight: 2, fillColor: COLOR_SELECTED, fillOpacity: 0.12 }).addTo(map)
-        onSelect(leads.filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], poly)))
+        onSelect(leads.filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], poly)), { type: 'lasso', poly })
       } else {
         const r = layer ? layer.getRadius() : 0
         if (r < 1) { clearLayer(); return }
-        onSelect(leads.filter(l => l.lat && l.lng && center.distanceTo(L.latLng(l.lat, l.lng)) <= r))
+        onSelect(leads.filter(l => l.lat && l.lng && center.distanceTo(L.latLng(l.lat, l.lng)) <= r), { type: 'radius', center, radiusM: r })
       }
     }
 

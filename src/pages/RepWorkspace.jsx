@@ -1,17 +1,17 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { MapContainer, TileLayer, Marker, Circle, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import {
   SATELLITE_TILE, JACKSONVILLE_CENTER, leadIcon, repLocationIcon, FitBounds, CenterOnLead, ClickToClear, DrawTool,
-  COLOR_OPEN, COLOR_OTHERS, COLOR_MINE, COLOR_SELECTED,
+  COLOR_OPEN, COLOR_OTHERS, COLOR_MINE, COLOR_SELECTED, pointInPolygon,
 } from '../components/mapTools.jsx'
 import {
   validatePin, getAllReps, getZipList, getAllLeads, getLeadsForRep, claimLead, unassignLead,
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
-  claimLeadsBulk, unassignLeadsBulk, getLeadsNearPin,
+  claimLeadsBulk, unassignLeadsBulk, getLeadsNearPin, getLeadsInBounds,
 } from '../api/sheets.js'
-import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed } from 'lucide-react'
+import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
@@ -20,6 +20,16 @@ const ACTION_LABELS = {
   claim: 'Claimed', bulk_claim: 'Claimed', unassign: 'Unassigned', bulk_unassign: 'Released',
   note: 'Note', edit: 'Edited', auto_recycle: 'Recycled', event: 'Event',
 }
+
+const LAYERS = [
+  { id: 'open',      label: 'Open Leads',    color: COLOR_OPEN    },
+  { id: 'mine',      label: 'All My Claims', color: COLOR_MINE    },
+  { id: 'contacted', label: 'Contacted',     color: '#f59e0b'     },
+  { id: 'working',   label: 'Working',       color: '#a855f7'     },
+  { id: 'followup',  label: 'Follow-up',     color: '#f97316'     },
+  { id: 'closed',    label: 'Closed',        color: '#6b7280'     },
+]
+const STATUS_PIN_COLOR = { 'no contact': COLOR_OPEN, contacted: '#f59e0b', working: '#a855f7', closed: '#6b7280' }
 
 function relationOf(lead, repId) {
   if (lead.assigned_rep_id && String(lead.assigned_rep_id) === String(repId)) return 'mine'
@@ -142,17 +152,6 @@ function RepLogin({ lockedSlug, onUnlock }) {
 
 // ── Map tab ─────────────────────────────────────────────────────────────────
 
-// Long-press (mobile) or right-click (desktop) drops a geo-search pin.
-function LongPressHandler({ onLongPress }) {
-  useMapEvents({
-    contextmenu: (e) => {
-      e.originalEvent?.preventDefault()
-      onLongPress(e.latlng)
-    },
-  })
-  return null
-}
-
 // Keep the Leaflet canvas correctly sized when the tab is shown or the
 // bottom profile panel opens/closes.
 function MapResizer({ active, panelOpen }) {
@@ -178,11 +177,14 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   const [bulkBusy, setBulkBusy] = useState(false)
   const [repPos, setRepPos] = useState(null)
   const [gpsErr, setGpsErr] = useState('')
-  // Long-press → pin → 2-mile geo-search state
-  const [pinPos, setPinPos] = useState(null)   // { lat, lng } of dropped pin, or null
-  const [pinLeads, setPinLeads] = useState([])
-  const [pinLoading, setPinLoading] = useState(false)
-  const [pinErr, setPinErr] = useState('')
+  // Drawn-area geo-search state (lasso/radius with no ZIP loaded)
+  const [geoAnchor, setGeoAnchor] = useState(null)  // { lat, lng, radiusM } for radius, null for lasso
+  const [geoLeadsSearch, setGeoLeadsSearch] = useState([])
+  const [geoLoading, setGeoLoading] = useState(false)
+  const [geoErr, setGeoErr] = useState('')
+  // Map layer / hamburger menu
+  const [mapLayer, setMapLayer] = useState('open')
+  const [menuOpen, setMenuOpen] = useState(false)
   const mapRef = useRef(null)
   const watchRef = useRef(null)
   const snappedRef = useRef(false)
@@ -221,8 +223,22 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
   const geoLeads = useMemo(() => leads.filter(l => l.lat && l.lng), [leads])
-  // When a pin is dropped, show geo-search results; otherwise show the loaded ZIP's leads.
-  const displayLeads = pinPos ? pinLeads.filter(l => l.lat && l.lng) : geoLeads
+
+  // Display depends on layer. Non-open layers show the rep's own leads from myLeads.
+  const displayLeads = useMemo(() => {
+    if (mapLayer !== 'open') {
+      const base = (myLeads || []).filter(l => l.lat && l.lng)
+      if (mapLayer === 'mine')      return base
+      if (mapLayer === 'contacted') return base.filter(l => (l.status || '').toLowerCase() === 'contacted')
+      if (mapLayer === 'working')   return base.filter(l => (l.status || '').toLowerCase() === 'working')
+      if (mapLayer === 'closed')    return base.filter(l => (l.status || '').toLowerCase() === 'closed')
+      if (mapLayer === 'followup')  return base.filter(isFollowup)
+    }
+    // Open layer: geo-search results (drawn area, no ZIP) OR loaded ZIP leads
+    if (geoLeadsSearch.length > 0 || geoLoading) return geoLeadsSearch.filter(l => l.lat && l.lng)
+    return geoLeads
+  }, [mapLayer, myLeads, geoLeads, geoLeadsSearch, geoLoading])
+
   const panelOpen = !!selectedLead && selectedLeads.length === 0
   // How many of the rep's own leads are in each ZIP (for the dropdown labels).
   const countByZip = useMemo(() => {
@@ -232,7 +248,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   }, [myLeads])
 
   async function loadZip(zip) {
-    setSelectedZip(zip); setPinPos(null); setPinLeads([]); setPinErr('')
+    setSelectedZip(zip); clearGeoSearch(); setMapLayer('open')
     setSelectedLead(null); setSelectedLeads([]); setError('')
     if (!zip) { setLeads([]); return }
     setLoading(true)
@@ -246,7 +262,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
 
   function patchLead(id, patch) {
     setLeads(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)))
-    setPinLeads(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)))
+    setGeoLeadsSearch(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)))
     setSelectedLead(prev => (prev && prev.id === id ? { ...prev, ...patch } : prev))
     setSelectedLeads(prev => prev.map(l => (l.id === id ? { ...l, ...patch } : l)))
   }
@@ -256,7 +272,6 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
     setSelectedLeads([])
     setSelectedLead(lead)
   }
-  const handleAreaSelect = useCallback(sel => { setSelectedLead(null); setSelectedLeads(sel) }, [])
 
   async function claimOne(lead) {
     setBusy(lead.id)
@@ -313,7 +328,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
       const claimed = new Set(results.flatMap(r => r.claimed || []))
       const applyPatch = l => ({ ...l, assigned_rep: rep.name, assigned_rep_id: rep.id, status: l.status || 'No Contact' })
       setLeads(prev => prev.map(l => (claimed.has(l.id) ? applyPatch(l) : l)))
-      setPinLeads(prev => prev.map(l => (claimed.has(l.id) ? applyPatch(l) : l)))
+      setGeoLeadsSearch(prev => prev.map(l => (claimed.has(l.id) ? applyPatch(l) : l)))
       targets.forEach(l => { if (claimed.has(l.id)) onMineAdd(applyPatch(l)) })
       const failed = targets.length - claimed.size
       if (failed > 0) setError(`${claimed.size} claimed, ${failed} skipped (already taken or cap).`)
@@ -332,7 +347,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
       )
       const released = new Set(results.flatMap(r => r.released || []))
       setLeads(prev => prev.map(l => (released.has(l.id) ? { ...l, assigned_rep: '', assigned_rep_id: '', status: '' } : l)))
-      setPinLeads(prev => prev.map(l => (released.has(l.id) ? { ...l, assigned_rep: '', assigned_rep_id: '', status: '' } : l)))
+      setGeoLeadsSearch(prev => prev.map(l => (released.has(l.id) ? { ...l, assigned_rep: '', assigned_rep_id: '', status: '' } : l)))
       released.forEach(id => onMineRemove(id))
     } catch (err) { setError(err.message) }
     finally { setBulkBusy(false); setSelectedLeads([]) }
@@ -343,30 +358,36 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   const selOpen = selectedLeads.filter(l => relationOf(l, rep.id) === 'open')
   const selMine = selectedLeads.filter(l => relationOf(l, rep.id) === 'mine')
 
-  // Purple pulsing dot for the dropped pin — distinct from GPS blue and lead pins.
-  const PIN_ICON = useMemo(() => L.divIcon({
-    className: '',
-    html: `<div style="width:24px;height:24px;border-radius:50%;background:#7c3aed;border:3px solid white;box-shadow:0 0 0 5px rgba(124,58,237,0.30),0 3px 8px rgba(0,0,0,0.6)"></div>`,
-    iconSize: [24, 24],
-    iconAnchor: [12, 12],
-  }), [])
+  function clearGeoSearch() {
+    setGeoAnchor(null); setGeoLeadsSearch([]); setGeoErr('')
+  }
 
-  async function handleLongPress(latlng) {
+  const handleAreaSelect = useCallback((sel, geometry) => {
+    // If a ZIP is loaded, filter the loaded leads normally
+    if (selectedZip) { setSelectedLead(null); setSelectedLeads(sel); return }
+    // No ZIP — trigger a geo-search using the drawn geometry
+    if (!geometry) return
     setSelectedLead(null); setSelectedLeads([])
-    setPinPos({ lat: latlng.lat, lng: latlng.lng })
-    setPinLeads([]); setPinErr(''); setPinLoading(true)
-    try {
-      const res = await getLeadsNearPin(latlng.lat, latlng.lng, 2)
-      setPinLeads(res.leads || [])
-    } catch (e) { setPinErr(e.message) }
-    finally { setPinLoading(false) }
-  }
-
-  function clearPin() {
-    setPinPos(null); setPinLeads([]); setPinErr(''); setSelectedLead(null); setSelectedLeads([])
-  }
-
-  const PIN_RADIUS_M = 2 * 1609.34   // 2 miles in metres
+    setGeoLeadsSearch([]); setGeoErr(''); setGeoLoading(true)
+    if (geometry.type === 'radius') {
+      const miles = geometry.radiusM / 1609.34
+      setGeoAnchor({ lat: geometry.center.lat, lng: geometry.center.lng, radiusM: geometry.radiusM })
+      getLeadsNearPin(geometry.center.lat, geometry.center.lng, miles)
+        .then(r => setGeoLeadsSearch(r.leads || []))
+        .catch(e => setGeoErr(e.message))
+        .finally(() => setGeoLoading(false))
+    } else {
+      setGeoAnchor(null)
+      const lats = geometry.poly.map(p => p[0]), lngs = geometry.poly.map(p => p[1])
+      getLeadsInBounds(Math.min(...lats), Math.max(...lats), Math.min(...lngs), Math.max(...lngs))
+        .then(r => {
+          const filtered = (r.leads || []).filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], geometry.poly))
+          setGeoLeadsSearch(filtered)
+        })
+        .catch(e => setGeoErr(e.message))
+        .finally(() => setGeoLoading(false))
+    }
+  }, [selectedZip])
 
   return (
     <div className="flex flex-col h-full">
@@ -399,34 +420,46 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
           <MapResizer active={active} panelOpen={panelOpen} />
           <ClickToClear enabled={!tool} onClear={() => { setSelectedLead(null); setSelectedLeads([]) }} />
           <DrawTool tool={tool} leads={displayLeads} onSelect={handleAreaSelect} />
-          <LongPressHandler onLongPress={handleLongPress} />
-          {pinPos && (
-            <>
-              <Marker position={[pinPos.lat, pinPos.lng]} icon={PIN_ICON} zIndexOffset={3000} />
-              <Circle center={[pinPos.lat, pinPos.lng]} radius={PIN_RADIUS_M}
-                pathOptions={{ color: '#7c3aed', weight: 1.5, fillColor: '#7c3aed', fillOpacity: 0.06 }} />
-            </>
+          {geoAnchor && (
+            <Circle center={[geoAnchor.lat, geoAnchor.lng]} radius={geoAnchor.radiusM}
+              pathOptions={{ color: '#7c3aed', weight: 1.5, fillColor: '#7c3aed', fillOpacity: 0.06 }} />
           )}
           {repPos && <Marker position={repPos} icon={repLocationIcon} zIndexOffset={2000} />}
           {displayLeads.map(lead => {
             const rel = relationOf(lead, rep.id)
             const sel = selectedIds.has(lead.id) || (selectedLead && selectedLead.id === lead.id)
+            const color = sel ? COLOR_SELECTED
+              : mapLayer === 'open' ? colorFor(rel, false)
+              : (STATUS_PIN_COLOR[(lead.status || '').toLowerCase()] || COLOR_MINE)
             return (
               <Marker
                 key={lead.id}
                 position={[lead.lat, lead.lng]}
-                icon={leadIcon(colorFor(rel, sel), sel)}
+                icon={leadIcon(color, sel)}
                 eventHandlers={{ click: () => handleMarkerClick(lead) }}
               />
             )
           })}
         </MapContainer>
 
-        {/* Legend */}
-        <div className="absolute top-2 left-2 z-[999] bg-slate-900/90 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-300 space-y-1 pointer-events-none">
-          <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: COLOR_OPEN }} /> Open</div>
-          <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: COLOR_MINE }} /> Mine</div>
-          <div className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full inline-block" style={{ background: COLOR_OTHERS }} /> Taken</div>
+        {/* Hamburger menu — layer switcher */}
+        <div className="absolute top-2 left-2 z-[1000]">
+          <button
+            onClick={() => setMenuOpen(v => !v)}
+            className={`p-2 rounded-lg border shadow-lg ${menuOpen ? 'bg-slate-700 border-slate-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300'}`}
+          ><Menu size={16} /></button>
+          {menuOpen && (
+            <div className="mt-1 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl min-w-44">
+              {LAYERS.map(layer => (
+                <button key={layer.id}
+                  onClick={() => { setMapLayer(layer.id); setMenuOpen(false) }}
+                  className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-2.5 transition-colors ${mapLayer === layer.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
+                  <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: layer.color }} />
+                  {layer.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Tools */}
@@ -444,33 +477,30 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
             title={repPos ? 'Center on me' : 'Find my location'}
             className={`p-2 rounded-lg border shadow-lg ${repPos ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300'}`}
           ><LocateFixed size={16} /></button>
-          {pinPos && (
-            <button
-              onClick={clearPin}
-              title="Clear pin"
-              className="p-2 rounded-lg border shadow-lg bg-purple-700 border-purple-500 text-white"
-            ><X size={16} /></button>
+          {(geoLeadsSearch.length > 0 || geoLoading) && (
+            <button onClick={clearGeoSearch} title="Clear search"
+              className="p-2 rounded-lg border shadow-lg bg-purple-700 border-purple-500 text-white">
+              <X size={16} />
+            </button>
           )}
         </div>
 
-        {pinPos && (
+        {(geoLoading || geoLeadsSearch.length > 0 || geoErr) && (
           <div className="absolute bottom-2 left-1/2 -translate-x-1/2 z-[999] pointer-events-none">
-            {pinLoading && (
+            {geoLoading && (
               <div className="bg-purple-900/90 text-purple-100 text-xs px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-2">
-                <Loader2 size={12} className="animate-spin" /> Searching 2 miles…
+                <Loader2 size={12} className="animate-spin" /> Searching area…
               </div>
             )}
-            {!pinLoading && !pinErr && (
+            {!geoLoading && !geoErr && geoLeadsSearch.length > 0 && (
               <div className="bg-purple-900/90 text-purple-100 text-xs px-3 py-1.5 rounded-lg shadow-lg">
-                {displayLeads.length} lead{displayLeads.length === 1 ? '' : 's'} within 2 miles
+                {geoLeadsSearch.length} lead{geoLeadsSearch.length === 1 ? '' : 's'} in area
                 {' · '}
-                <button className="underline pointer-events-auto" onClick={clearPin}>clear pin</button>
+                <button className="underline pointer-events-auto" onClick={clearGeoSearch}>clear</button>
               </div>
             )}
-            {pinErr && (
-              <div className="bg-red-900/90 text-red-100 text-xs px-3 py-1.5 rounded-lg shadow-lg">
-                {pinErr}
-              </div>
+            {geoErr && (
+              <div className="bg-red-900/90 text-red-100 text-xs px-3 py-1.5 rounded-lg shadow-lg">{geoErr}</div>
             )}
           </div>
         )}
@@ -487,11 +517,12 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
           </div>
         )}
 
-        {!selectedZip && !pinPos && !loading && (
+        {!selectedZip && mapLayer === 'open' && !geoLoading && geoLeadsSearch.length === 0 && !loading && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="bg-slate-900/80 rounded-xl px-5 py-4 text-center">
               <MapIcon size={26} className="text-slate-600 mb-2 mx-auto" />
-              <div className="text-slate-300 text-sm font-medium">Pick a ZIP or long-press to drop a pin</div>
+              <div className="text-slate-300 text-sm font-medium">Pick a ZIP to load leads</div>
+              <div className="text-slate-500 text-xs mt-1">or use lasso / radius to search an area</div>
             </div>
           </div>
         )}

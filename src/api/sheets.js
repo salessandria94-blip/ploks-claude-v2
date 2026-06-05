@@ -87,6 +87,17 @@ export async function getLeadsForZip(zip) {
   return getAllLeads(zip)
 }
 
+export async function getLeadsInBounds(latMin, latMax, lngMin, lngMax) {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('bucket', 'ACTIVE')
+    .gte('lat', latMin).lte('lat', latMax)
+    .gte('lng', lngMin).lte('lng', lngMax)
+  if (error) throw new Error(error.message)
+  return { leads: data || [] }
+}
+
 export async function getLeadsNearPin(lat, lng, radiusMiles = 2) {
   const DEG_LAT = radiusMiles / 69.0
   const DEG_LNG = radiusMiles / (69.0 * Math.cos(lat * Math.PI / 180))
