@@ -290,63 +290,49 @@ export async function logActivity(entry) {
 // ── Dashboard ─────────────────────────────────────────────────────────────────
 
 export async function getDashboardStats() {
-  const FOLLOW_UP_MS = 30 * 24 * 60 * 60 * 1000
-  const now = Date.now()
-
-  const [{ data: leads, error: e1 }, { data: reps, error: e2 }] = await Promise.all([
-    supabase.from('leads')
-      .select('id, assigned_rep_id, zip, status, status_changed_at')
-      .eq('bucket', 'ACTIVE')
-      .limit(25000),
-    supabase.from('reps')
-      .select('id, name, slug')
-      .eq('active', true)
-      .order('name'),
+  // All aggregation runs server-side via RPC — no row limit issues
+  const [{ data: stats, error: e1 }, { data: reps, error: e2 }] = await Promise.all([
+    supabase.rpc('ploks_dashboard_stats'),
+    supabase.from('reps').select('id, name, slug').eq('active', true).order('name'),
   ])
   if (e1) throw new Error(e1.message)
   if (e2) throw new Error(e2.message)
 
-  const totals = { total: leads.length, open: 0, claimed: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }
-  const repMap = {}
-  const zipMap = {}
+  // Coerce all numeric fields from strings (jsonb returns them as numbers already, but be safe)
+  const n = v => Number(v) || 0
+  const raw = stats || {}
 
-  for (const lead of leads) {
-    const status   = lead.status || 'No Contact'
-    const assigned = !!lead.assigned_rep_id
-    const isFollowUp = status === 'Contacted' && lead.status_changed_at &&
-      (now - new Date(lead.status_changed_at).getTime()) > FOLLOW_UP_MS
-
-    // ZIP stats — track every lead regardless of assignment
-    const z = lead.zip || 'unknown'
-    if (!zipMap[z]) zipMap[z] = { zip: z, total: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }
-    zipMap[z].total++
-    if (isFollowUp)             zipMap[z].follow_up++
-    else if (status === 'Contacted') zipMap[z].contacted++
-    else if (status === 'Working')   zipMap[z].working++
-    else if (status === 'Closed')    zipMap[z].closed++
-
-    if (!assigned) { totals.open++; continue }
-
-    const key = lead.assigned_rep_id
-    if (!repMap[key]) repMap[key] = { claimed: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }
-    const r = repMap[key]
-
-    if (status === 'No Contact')     { totals.claimed++;   r.claimed++   }
-    else if (isFollowUp)             { totals.follow_up++; r.follow_up++ }
-    else if (status === 'Contacted') { totals.contacted++; r.contacted++ }
-    else if (status === 'Working')   { totals.working++;   r.working++   }
-    else if (status === 'Closed')    { totals.closed++;    r.closed++    }
+  const totals = {
+    total:      n(raw.totals?.total),
+    open:       n(raw.totals?.open),
+    claimed:    n(raw.totals?.claimed),
+    contacted:  n(raw.totals?.contacted),
+    follow_up:  n(raw.totals?.follow_up),
+    working:    n(raw.totals?.working),
+    closed:     n(raw.totals?.closed),
   }
 
+  const repById = Object.fromEntries(
+    (raw.rep_stats || []).map(r => [r.id, r])
+  )
   const repStats = (reps || []).map(r => ({
     id: r.id, name: r.name, slug: r.slug,
-    ...(repMap[r.id] || { claimed: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }),
+    claimed:   n(repById[r.id]?.claimed),
+    contacted: n(repById[r.id]?.contacted),
+    follow_up: n(repById[r.id]?.follow_up),
+    working:   n(repById[r.id]?.working),
+    closed:    n(repById[r.id]?.closed),
   }))
 
-  // Rank ZIPs by engaged leads (contacted + follow_up + working + closed)
-  const zipStats = Object.values(zipMap)
-    .map(z => ({ ...z, score: z.contacted + z.follow_up + z.working + z.closed }))
-    .sort((a, b) => b.score - a.score)
+  const zipStats = (raw.zip_stats || []).map(z => ({
+    zip:       z.zip,
+    total:     n(z.total),
+    contacted: n(z.contacted),
+    follow_up: n(z.follow_up),
+    working:   n(z.working),
+    closed:    n(z.closed),
+    score:     n(z.score),
+  }))
 
   return { totals, repStats, zipStats }
 }
