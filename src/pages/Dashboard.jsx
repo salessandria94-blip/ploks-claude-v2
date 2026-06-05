@@ -138,7 +138,6 @@ function ZipSegmentBar({ z }) {
 }
 
 function ZipLeaderboardCard({ zipStats }) {
-  const [cardOpen,  setCardOpen]  = useState(true)
   const [showAll,   setShowAll]   = useState(false)
   const [activeZip, setActiveZip] = useState(null)
 
@@ -151,25 +150,15 @@ function ZipLeaderboardCard({ zipStats }) {
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
 
-      {/* Header — click to collapse/expand the whole card */}
-      <button
-        onClick={() => setCardOpen(o => !o)}
-        className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-800/50 transition-colors"
-      >
+      {/* Header — static, no collapse */}
+      <div className="flex items-center justify-between px-5 py-4">
         <h2 className="text-slate-100 font-semibold text-sm uppercase tracking-wider">
           Top ZIPs by Activity
         </h2>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500">{zipStats.length} ZIPs</span>
-          {cardOpen
-            ? <ChevronUp size={14} className="text-slate-400" />
-            : <ChevronDown size={14} className="text-slate-400" />}
-        </div>
-      </button>
+        <span className="text-xs text-slate-500">{zipStats.length} ZIPs</span>
+      </div>
 
-      {/* Body */}
-      {cardOpen && (
-        <div className="px-5 pb-5">
+      <div className="px-5 pb-5">
 
           {/* ZIP rows */}
           <div className="flex flex-col gap-1.5">
@@ -248,8 +237,7 @@ function ZipLeaderboardCard({ zipStats }) {
             )}
           </div>
 
-        </div>
-      )}
+      </div>
     </div>
   )
 }
