@@ -108,71 +108,148 @@ function RepCard({ rep }) {
   )
 }
 
+const TOP = 5
+const ZIP_SEGMENTS = [
+  { key: 'contacted', color: '#eab308', label: 'Contacted' },
+  { key: 'follow_up', color: '#f97316', label: 'Follow Up' },
+  { key: 'working',   color: '#22c55e', label: 'Working'   },
+  { key: 'closed',    color: '#a855f7', label: 'Closed'    },
+]
+
+function ZipSegmentBar({ z }) {
+  const total = z.total || 1
+  return (
+    <div className="flex h-2.5 rounded-full overflow-hidden w-full bg-slate-700">
+      {ZIP_SEGMENTS.map(s => {
+        const pct = (z[s.key] / total) * 100
+        if (pct <= 0) return null
+        return (
+          <div
+            key={s.key}
+            style={{ width: `${pct}%`, background: s.color }}
+            title={`${s.label}: ${z[s.key]}`}
+          />
+        )
+      })}
+      {/* remainder — open/unclaimed */}
+      <div className="flex-1 bg-slate-600" title="Open / Unclaimed" />
+    </div>
+  )
+}
+
 function ZipLeaderboardCard({ zipStats }) {
-  const [expanded, setExpanded] = useState(false)
-  const visible = expanded ? zipStats : zipStats.slice(0, 10)
-  const topScore = zipStats[0]?.score || 1
+  const [cardOpen,  setCardOpen]  = useState(true)
+  const [showAll,   setShowAll]   = useState(false)
+  const [activeZip, setActiveZip] = useState(null)
+
+  const visible = showAll ? zipStats : zipStats.slice(0, TOP)
+
+  function toggleZip(zip) {
+    setActiveZip(a => a === zip ? null : zip)
+  }
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+
+      {/* Header — click to collapse/expand the whole card */}
+      <button
+        onClick={() => setCardOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-800/50 transition-colors"
+      >
         <h2 className="text-slate-100 font-semibold text-sm uppercase tracking-wider">
           Top ZIPs by Activity
         </h2>
-        <span className="text-xs text-slate-500">{zipStats.length} ZIPs total</span>
-      </div>
-
-      {/* Rows */}
-      <div className="flex flex-col gap-2">
-        {visible.map((z, i) => {
-          const barPct = topScore > 0 ? Math.round((z.score / topScore) * 100) : 0
-          return (
-            <div key={z.zip} className="flex items-center gap-3">
-              {/* Rank */}
-              <span className="text-xs text-slate-500 w-5 shrink-0 text-right">{i + 1}</span>
-              {/* ZIP */}
-              <span className="text-xs font-mono text-slate-200 w-12 shrink-0">{z.zip}</span>
-              {/* Bar */}
-              <div className="flex-1 bg-slate-800 rounded-full h-1.5 overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-blue-500"
-                  style={{ width: `${barPct}%` }}
-                />
-              </div>
-              {/* Breakdown */}
-              <div className="flex items-center gap-2 text-xs font-mono shrink-0">
-                <span className="text-yellow-300 w-6 text-right" title="Contacted">{z.contacted}</span>
-                <span className="text-orange-300 w-6 text-right" title="Follow Up">{z.follow_up}</span>
-                <span className="text-green-300  w-6 text-right" title="Working">{z.working}</span>
-                <span className="text-purple-300 w-6 text-right" title="Closed">{z.closed}</span>
-                <span className="text-slate-400  w-8 text-right" title="Total">{z.total}</span>
-              </div>
-            </div>
-          )
-        })}
-      </div>
-
-      {/* Legend + expand toggle */}
-      <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800">
-        <div className="flex items-center gap-3 text-xs text-slate-500">
-          <span><span className="text-yellow-300">■</span> Contacted</span>
-          <span><span className="text-orange-300">■</span> Follow Up</span>
-          <span><span className="text-green-300">■</span> Working</span>
-          <span><span className="text-purple-300">■</span> Closed</span>
-          <span><span className="text-slate-400">■</span> Total</span>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">{zipStats.length} ZIPs</span>
+          {cardOpen
+            ? <ChevronUp size={14} className="text-slate-400" />
+            : <ChevronDown size={14} className="text-slate-400" />}
         </div>
-        {zipStats.length > 10 && (
-          <button
-            onClick={() => setExpanded(e => !e)}
-            className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
-          >
-            {expanded
-              ? <><ChevronUp size={12} /> Show less</>
-              : <><ChevronDown size={12} /> Show all {zipStats.length}</>}
-          </button>
-        )}
-      </div>
+      </button>
+
+      {/* Body */}
+      {cardOpen && (
+        <div className="px-5 pb-5">
+
+          {/* ZIP rows */}
+          <div className="flex flex-col gap-1.5">
+            {visible.map((z, i) => {
+              const isActive = activeZip === z.zip
+              const openCount = z.total - z.contacted - z.follow_up - z.working - z.closed
+              return (
+                <div
+                  key={z.zip}
+                  onClick={() => toggleZip(z.zip)}
+                  className={`rounded-lg px-3 py-2.5 cursor-pointer border transition-all ${
+                    isActive
+                      ? 'border-blue-500 bg-slate-800'
+                      : 'border-slate-800 hover:border-slate-600 hover:bg-slate-800/60'
+                  }`}
+                >
+                  {/* Row header */}
+                  <div className="flex items-center gap-2.5 mb-2">
+                    <span className="text-xs text-slate-500 w-4 shrink-0 text-right">{i + 1}</span>
+                    <span className="text-sm font-mono font-semibold text-slate-200 w-12 shrink-0">{z.zip}</span>
+                    <span className="text-xs text-slate-500 ml-auto">{z.total.toLocaleString()} leads</span>
+                  </div>
+
+                  {/* iPhone-style segmented bar */}
+                  <ZipSegmentBar z={z} />
+
+                  {/* Expanded raw numbers */}
+                  {isActive && (
+                    <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 pt-2.5 border-t border-slate-700">
+                      <div className="flex justify-between">
+                        <span className="text-xs text-slate-500">Open / Unclaimed</span>
+                        <span className="text-xs font-mono font-semibold text-slate-400">{openCount.toLocaleString()}</span>
+                      </div>
+                      {ZIP_SEGMENTS.map(s => (
+                        <div key={s.key} className="flex justify-between">
+                          <span className="text-xs text-slate-500">{s.label}</span>
+                          <span className="text-xs font-mono font-semibold" style={{ color: s.color }}>
+                            {z[s.key].toLocaleString()}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="col-span-2 flex justify-between border-t border-slate-700 pt-1.5 mt-0.5">
+                        <span className="text-xs text-slate-400 font-medium">Total</span>
+                        <span className="text-xs font-mono font-semibold text-slate-300">{z.total.toLocaleString()}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          {/* Footer: legend + show all toggle */}
+          <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800">
+            <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+              {ZIP_SEGMENTS.map(s => (
+                <span key={s.key} className="flex items-center gap-1">
+                  <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: s.color }} />
+                  {s.label}
+                </span>
+              ))}
+              <span className="flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-sm inline-block bg-slate-600" />
+                Open
+              </span>
+            </div>
+            {zipStats.length > TOP && (
+              <button
+                onClick={e => { e.stopPropagation(); setShowAll(a => !a) }}
+                className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors shrink-0 ml-3"
+              >
+                {showAll
+                  ? <><ChevronUp size={12} /> Show less</>
+                  : <><ChevronDown size={12} /> All {zipStats.length}</>}
+              </button>
+            )}
+          </div>
+
+        </div>
+      )}
     </div>
   )
 }
