@@ -295,7 +295,7 @@ export async function getDashboardStats() {
 
   const [{ data: leads, error: e1 }, { data: reps, error: e2 }] = await Promise.all([
     supabase.from('leads')
-      .select('id, assigned_rep_id, status, status_changed_at')
+      .select('id, assigned_rep_id, zip, status, status_changed_at')
       .eq('bucket', 'ACTIVE'),
     supabase.from('reps')
       .select('id, name, slug')
@@ -307,12 +307,22 @@ export async function getDashboardStats() {
 
   const totals = { total: leads.length, open: 0, claimed: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }
   const repMap = {}
+  const zipMap = {}
 
   for (const lead of leads) {
     const status   = lead.status || 'No Contact'
     const assigned = !!lead.assigned_rep_id
     const isFollowUp = status === 'Contacted' && lead.status_changed_at &&
       (now - new Date(lead.status_changed_at).getTime()) > FOLLOW_UP_MS
+
+    // ZIP stats — track every lead regardless of assignment
+    const z = lead.zip || 'unknown'
+    if (!zipMap[z]) zipMap[z] = { zip: z, total: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }
+    zipMap[z].total++
+    if (isFollowUp)             zipMap[z].follow_up++
+    else if (status === 'Contacted') zipMap[z].contacted++
+    else if (status === 'Working')   zipMap[z].working++
+    else if (status === 'Closed')    zipMap[z].closed++
 
     if (!assigned) { totals.open++; continue }
 
@@ -332,7 +342,12 @@ export async function getDashboardStats() {
     ...(repMap[r.id] || { claimed: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }),
   }))
 
-  return { totals, repStats }
+  // Rank ZIPs by engaged leads (contacted + follow_up + working + closed)
+  const zipStats = Object.values(zipMap)
+    .map(z => ({ ...z, score: z.contacted + z.follow_up + z.working + z.closed }))
+    .sort((a, b) => b.score - a.score)
+
+  return { totals, repStats, zipStats }
 }
 
 export async function getRecentActivity(limit = 20) {

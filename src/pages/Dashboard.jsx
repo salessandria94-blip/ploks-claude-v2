@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
 import { getDashboardStats, getRecentActivity } from '../api/sheets.js'
 
 const CAP = 500
@@ -103,6 +103,75 @@ function RepCard({ rep }) {
             <span className={`text-xs font-mono font-semibold ${s.color}`}>{s.value}</span>
           </div>
         ))}
+      </div>
+    </div>
+  )
+}
+
+function ZipLeaderboardCard({ zipStats }) {
+  const [expanded, setExpanded] = useState(false)
+  const visible = expanded ? zipStats : zipStats.slice(0, 10)
+  const topScore = zipStats[0]?.score || 1
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-slate-100 font-semibold text-sm uppercase tracking-wider">
+          Top ZIPs by Activity
+        </h2>
+        <span className="text-xs text-slate-500">{zipStats.length} ZIPs total</span>
+      </div>
+
+      {/* Rows */}
+      <div className="flex flex-col gap-2">
+        {visible.map((z, i) => {
+          const barPct = topScore > 0 ? Math.round((z.score / topScore) * 100) : 0
+          return (
+            <div key={z.zip} className="flex items-center gap-3">
+              {/* Rank */}
+              <span className="text-xs text-slate-500 w-5 shrink-0 text-right">{i + 1}</span>
+              {/* ZIP */}
+              <span className="text-xs font-mono text-slate-200 w-12 shrink-0">{z.zip}</span>
+              {/* Bar */}
+              <div className="flex-1 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-blue-500"
+                  style={{ width: `${barPct}%` }}
+                />
+              </div>
+              {/* Breakdown */}
+              <div className="flex items-center gap-2 text-xs font-mono shrink-0">
+                <span className="text-yellow-300 w-6 text-right" title="Contacted">{z.contacted}</span>
+                <span className="text-orange-300 w-6 text-right" title="Follow Up">{z.follow_up}</span>
+                <span className="text-green-300  w-6 text-right" title="Working">{z.working}</span>
+                <span className="text-purple-300 w-6 text-right" title="Closed">{z.closed}</span>
+                <span className="text-slate-400  w-8 text-right" title="Total">{z.total}</span>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Legend + expand toggle */}
+      <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800">
+        <div className="flex items-center gap-3 text-xs text-slate-500">
+          <span><span className="text-yellow-300">■</span> Contacted</span>
+          <span><span className="text-orange-300">■</span> Follow Up</span>
+          <span><span className="text-green-300">■</span> Working</span>
+          <span><span className="text-purple-300">■</span> Closed</span>
+          <span><span className="text-slate-400">■</span> Total</span>
+        </div>
+        {zipStats.length > 10 && (
+          <button
+            onClick={() => setExpanded(e => !e)}
+            className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            {expanded
+              ? <><ChevronUp size={12} /> Show less</>
+              : <><ChevronDown size={12} /> Show all {zipStats.length}</>}
+          </button>
+        )}
       </div>
     </div>
   )
@@ -228,6 +297,11 @@ export default function Dashboard() {
               ))}
             </div>
           </div>
+
+          {/* ZIP leaderboard */}
+          {stats.zipStats?.length > 0 && (
+            <ZipLeaderboardCard zipStats={stats.zipStats} />
+          )}
 
           {/* Activity feed */}
           <ActivityFeed entries={activity} repNameMap={repNameMap} loadedAt={loadedAt} />
