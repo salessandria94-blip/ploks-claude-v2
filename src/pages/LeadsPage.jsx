@@ -58,7 +58,7 @@ function LeadProfile({ lead, reps, onClose, onLeadUpdate }) {
     if (Object.keys(fields).length === 0) { setSaving(false); return }
 
     try {
-      await updateLeadProfile(lead.id, fields)
+      await updateLeadProfile(lead.id, fields, 'admin')
       onLeadUpdate(lead.id, fields)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)

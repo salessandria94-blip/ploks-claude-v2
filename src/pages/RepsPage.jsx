@@ -90,7 +90,7 @@ export default function RepsPage() {
         <div className="flex flex-col items-center justify-center py-24 text-center">
           <Users size={32} className="text-slate-600 mb-3" />
           <div className="text-slate-400 text-sm font-medium">No reps found</div>
-          <div className="text-slate-600 text-xs mt-1">Check that PLOKS_REPS sheet is populated</div>
+          <div className="text-slate-600 text-xs mt-1">No reps found in the database</div>
         </div>
       )}
 
