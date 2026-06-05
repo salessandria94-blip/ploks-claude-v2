@@ -136,46 +136,33 @@ export async function getLeadActivity(leadId) {
 // ── Leads — writes ────────────────────────────────────────────────────────────
 
 export async function claimLead(leadId, repId, repName, location, zip) {
-  const now = new Date().toISOString()
-  const { data, error } = await supabase
-    .from('leads')
-    .update({
-      assigned_rep:     repName || repId,
-      assigned_rep_id:  repId,
-      assigned_week:    now.slice(0, 10),
-      status:           'No Contact',
-      claimed_at:       now,
-      status_changed_at: now,
-    })
-    .eq('id', leadId)
-    .is('assigned_rep_id', null)
-    .select('id')
+  const { data, error } = await supabase.rpc('claim_lead_safe', {
+    p_lead_id:  leadId,
+    p_rep_id:   repId,
+    p_rep_name: repName || repId,
+  })
   if (error) throw new Error(error.message)
-  if (!data.length) throw new Error('Lead was just claimed by someone else.')
+  if (!data.ok) {
+    if (data.error === 'cap')   throw new Error("You've reached your 500 No Contact lead cap.")
+    if (data.error === 'taken') throw new Error('Lead was just claimed by someone else.')
+    throw new Error('Claim failed')
+  }
   await insertLog('claim', leadId, repId)
   return { ok: true, leadId, repId }
 }
 
 export async function claimLeadsBulk(leadIds, repId, repName, zip) {
-  const now = new Date().toISOString()
   const CHUNK = 100
   const claimed = []
   for (let i = 0; i < leadIds.length; i += CHUNK) {
-    const { data, error } = await supabase
-      .from('leads')
-      .update({
-        assigned_rep:      repName || repId,
-        assigned_rep_id:   repId,
-        assigned_week:     now.slice(0, 10),
-        status:            'No Contact',
-        claimed_at:        now,
-        status_changed_at: now,
-      })
-      .in('id', leadIds.slice(i, i + CHUNK))
-      .is('assigned_rep_id', null)
-      .select('id')
+    const { data, error } = await supabase.rpc('claim_leads_bulk_safe', {
+      p_lead_ids: leadIds.slice(i, i + CHUNK),
+      p_rep_id:   repId,
+      p_rep_name: repName || repId,
+    })
     if (error) throw new Error(error.message)
-    claimed.push(...(data || []).map(r => r.id))
+    if (!data.ok && data.error === 'cap') break  // cap hit — stop claiming
+    claimed.push(...(data.claimed || []))
   }
   if (claimed.length) {
     await supabase.from('activity_log').insert(
