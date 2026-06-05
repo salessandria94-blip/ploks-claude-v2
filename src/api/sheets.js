@@ -296,7 +296,8 @@ export async function getDashboardStats() {
   const [{ data: leads, error: e1 }, { data: reps, error: e2 }] = await Promise.all([
     supabase.from('leads')
       .select('id, assigned_rep_id, zip, status, status_changed_at')
-      .eq('bucket', 'ACTIVE'),
+      .eq('bucket', 'ACTIVE')
+      .limit(25000),
     supabase.from('reps')
       .select('id, name, slug')
       .eq('active', true)

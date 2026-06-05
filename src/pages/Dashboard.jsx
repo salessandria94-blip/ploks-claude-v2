@@ -189,31 +189,50 @@ function timeAgo(ts, now) {
 }
 
 function ActivityFeed({ entries, repNameMap, loadedAt }) {
+  const [open, setOpen] = useState(false)
 
   return (
-    <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-      <h2 className="text-slate-100 font-semibold text-sm uppercase tracking-wider mb-4">Recent Activity</h2>
-      {entries.length === 0 ? (
-        <p className="text-slate-500 text-sm">No activity yet.</p>
-      ) : (
-        <div className="flex flex-col divide-y divide-slate-800">
-          {entries.map((e, i) => (
-            <div key={e.id || i} className="flex items-start gap-3 py-2 text-xs">
-              <span className="text-slate-500 w-16 shrink-0 pt-px">{timeAgo(e.ts, loadedAt)}</span>
-              <span className="text-slate-300 w-28 shrink-0">
-                {ACTION_LABELS[e.action] || e.action}
-                {e.action === 'status_update' && e.status
-                  ? <span className="text-slate-400"> {e.status}</span>
-                  : null}
-              </span>
-              <span className="text-blue-400 font-medium w-24 shrink-0 truncate">
-                {repNameMap[e.rep_id] || e.rep_id || '—'}
-              </span>
-              {e.notes && (
-                <span className="text-slate-500 truncate">{e.notes}</span>
-              )}
+    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      {/* Header — always visible, click to toggle */}
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-800/50 transition-colors"
+      >
+        <h2 className="text-slate-100 font-semibold text-sm uppercase tracking-wider">Recent Activity</h2>
+        <div className="flex items-center gap-2">
+          {!open && entries.length > 0 && (
+            <span className="text-xs text-slate-500">{entries.length} logs</span>
+          )}
+          {open ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+        </div>
+      </button>
+
+      {/* Body — only when open */}
+      {open && (
+        <div className="px-5 pb-5">
+          {entries.length === 0 ? (
+            <p className="text-slate-500 text-sm">No activity yet.</p>
+          ) : (
+            <div className="flex flex-col divide-y divide-slate-800">
+              {entries.map((e, i) => (
+                <div key={e.id || i} className="flex items-start gap-3 py-2 text-xs">
+                  <span className="text-slate-500 w-16 shrink-0 pt-px">{timeAgo(e.ts, loadedAt)}</span>
+                  <span className="text-slate-300 w-28 shrink-0">
+                    {ACTION_LABELS[e.action] || e.action}
+                    {e.action === 'status_update' && e.status
+                      ? <span className="text-slate-400"> {e.status}</span>
+                      : null}
+                  </span>
+                  <span className="text-blue-400 font-medium w-24 shrink-0 truncate">
+                    {repNameMap[e.rep_id] || e.rep_id || '—'}
+                  </span>
+                  {e.notes && (
+                    <span className="text-slate-500 truncate">{e.notes}</span>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
+          )}
         </div>
       )}
     </div>
