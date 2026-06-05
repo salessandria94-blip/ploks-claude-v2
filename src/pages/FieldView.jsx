@@ -40,6 +40,16 @@ function FlyToLocation({ coords }) {
   return null
 }
 
+const SEARCH_PIN_ICON = L.divIcon({
+  className: '',
+  html: `<svg width="28" height="40" viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
+    <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 26 14 26S28 24.5 28 14C28 6.3 21.7 0 14 0z" fill="#ef4444" stroke="white" stroke-width="1.5"/>
+    <circle cx="14" cy="14" r="5" fill="white"/>
+  </svg>`,
+  iconSize:   [28, 40],
+  iconAnchor: [14, 40],
+})
+
 function RepDot({ position }) {
   if (!position) return null
   return <Marker position={position} icon={repIcon} zIndexOffset={1000} />
@@ -299,6 +309,7 @@ export default function FieldView() {
           >
             <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
             <FlyToLocation coords={flyTarget} />
+            {flyTarget && <Marker position={flyTarget} icon={SEARCH_PIN_ICON} />}
             <RepDot position={repPos} />
             <LocationButton position={repPos} onEnableGps={startGps} />
             <MapClickCapture onMapClick={() => setSelectedLead(null)} />
