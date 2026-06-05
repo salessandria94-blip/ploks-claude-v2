@@ -1,116 +1,282 @@
-// Apps Script Web App bridge — Phase 2 implementation
-// All reads/writes go through this module. Nothing talks to Google directly.
+// PLOKS API — Supabase backend
+// All reads/writes go directly to Postgres. No more Apps Script.
 
-const API_URL = import.meta.env.VITE_APPS_SCRIPT_URL
-const API_SECRET = import.meta.env.VITE_API_SECRET
+import { createClient } from '@supabase/supabase-js'
 
-async function call(action, payload = {}, attempt = 0, timeoutMs = 20000) {
-  if (!API_URL) throw new Error('VITE_APPS_SCRIPT_URL not set')
-  // Apps Script drops POST bodies on redirect — use GET with encoded params instead
-  const params = new URLSearchParams({
-    action,
-    secret: API_SECRET,
-    data: JSON.stringify(payload),
-  })
-  // Mobile connections stall silently — without a timeout the request hangs
-  // forever. Abort after timeoutMs and auto-retry once before surfacing an error.
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    const res = await fetch(`${API_URL}?${params.toString()}`, {
-      redirect: 'follow',
-      cache: 'no-store',
-      signal: ctrl.signal,
-    })
-    if (!res.ok) throw new Error(`API error ${res.status}`)
-    const data = JSON.parse(await res.text())
-    if (data.error) throw new Error(data.error)
-    return data
-  } catch (e) {
-    // Retry once on a stalled/aborted connection (transient on mobile).
-    if ((e.name === 'AbortError' || e.name === 'TypeError') && attempt < 1) {
-      return call(action, payload, attempt + 1, timeoutMs)
-    }
-    if (e.name === 'AbortError') throw new Error('Network timed out — try again')
-    throw e
-  } finally {
-    clearTimeout(timer)
-  }
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+)
+
+function haversineMiles(lat1, lng1, lat2, lng2) {
+  const R = 3958.8
+  const dLat = (lat2 - lat1) * Math.PI / 180
+  const dLng = (lng2 - lng1) * Math.PI / 180
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
+
+async function insertLog(action, leadId, repId, status = '', notes = '') {
+  await supabase.from('activity_log').insert({
+    action,
+    lead_id:  leadId  || null,
+    rep_id:   repId   || null,
+    status:   status  || null,
+    notes:    notes   || null,
+  })
+}
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
 
 export async function validatePin(repSlug, pin) {
-  // Returns rep profile if valid, throws if invalid
-  return call('validatePin', { repSlug, pin })
+  const { data, error } = await supabase
+    .from('reps')
+    .select('id, name, slug')
+    .eq('slug', repSlug)
+    .eq('pin', pin)
+    .single()
+  if (error || !data) throw new Error('Invalid PIN')
+  return { ok: true, rep: data }
 }
 
-export async function getLeadsForZip(zip) {
-  return call('getLeadsForZip', { zip })
-}
-
-export async function getLeadsForRep(repId) {
-  // Scans all territories — give it a longer leash than the default 20s.
-  return call('getLeadsForRep', { repId }, 0, 40000)
-}
-
-export async function claimLead(leadId, repId, repName, location, zip) {
-  return call('claimLead', { leadId, repId, repName, location, zip })
-}
-
-export async function updateLeadStatus(leadId, status, notes, repId, zip) {
-  return call('updateLeadStatus', { leadId, status, notes, repId, zip })
-}
-
-export async function logActivity(entry) {
-  return call('logActivity', entry)
-}
-
-export async function getAllLeads(zip, filters = {}) {
-  return call('getAllLeads', { zip, ...filters })
-}
-
-export async function getZipList() {
-  return call('getZipList', {})
-}
+// ── Reps ──────────────────────────────────────────────────────────────────────
 
 export async function getAllReps() {
-  return call('getAllReps', {})
-}
-
-export async function assignLead(leadId, repId, repName, zip) {
-  return call('assignLead', { leadId, repId, repName, zip })
-}
-
-export async function unassignLead(leadId, zip) {
-  return call('unassignLead', { leadId, zip })
-}
-
-export async function claimLeadsBulk(leadIds, repId, repName, zip) {
-  return call('claimLeadsBulk', { leadIds, repId, repName, zip })
-}
-
-export async function unassignLeadsBulk(leadIds, repId, zip) {
-  return call('unassignLeadsBulk', { leadIds, repId, zip })
-}
-
-export async function updateLeadProfile(leadId, fields, repId) {
-  return call('updateLeadProfile', { leadId, fields, repId })
-}
-
-export async function unassignAll() {
-  return call('unassignAll', {})
-}
-
-export async function getLeadActivity(leadId) {
-  return call('getLeadActivity', { leadId })
+  const { data, error } = await supabase
+    .from('reps')
+    .select('id, name, slug')
+    .eq('active', true)
+    .order('name')
+  if (error) throw new Error(error.message)
+  return { reps: data }
 }
 
 export async function getRepStats() {
-  return call('getRepStats', {})
+  return getAllReps()
+}
+
+// ── Leads — reads ─────────────────────────────────────────────────────────────
+
+export async function getZipList() {
+  const { data, error } = await supabase.rpc('get_zip_list')
+  if (error) throw new Error(error.message)
+  return { zips: data.map(r => r.zip) }
+}
+
+export async function getAllLeads(zip) {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('zip', zip)
+    .eq('bucket', 'ACTIVE')
+  if (error) throw new Error(error.message)
+  return { leads: data, zip, found: true, count: data.length }
+}
+
+export async function getLeadsForRep(repId) {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('assigned_rep_id', repId)
+  if (error) throw new Error(error.message)
+  return { leads: data, repId, count: data.length }
+}
+
+export async function getLeadsForZip(zip) {
+  return getAllLeads(zip)
 }
 
 export async function getLeadsNearPin(lat, lng, radiusMiles = 2) {
-  // Cross-ZIP geo-search — scans all 24 ZIP sheets via the Sheets API.
-  // Expect ~5–15s on the first call; give it a longer leash.
-  return call('getLeadsNearPin', { lat, lng, radiusMiles }, 0, 40000)
+  const DEG_LAT = radiusMiles / 69.0
+  const DEG_LNG = radiusMiles / (69.0 * Math.cos(lat * Math.PI / 180))
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('bucket', 'ACTIVE')
+    .gte('lat', lat - DEG_LAT).lte('lat', lat + DEG_LAT)
+    .gte('lng', lng - DEG_LNG).lte('lng', lng + DEG_LNG)
+  if (error) throw new Error(error.message)
+  const leads = (data || []).filter(l =>
+    l.lat && l.lng && haversineMiles(lat, lng, l.lat, l.lng) <= radiusMiles
+  )
+  return { leads, count: leads.length, pinLat: lat, pinLng: lng, miles: radiusMiles }
 }
 
+export async function getLeadActivity(leadId) {
+  const { data, error } = await supabase
+    .from('activity_log')
+    .select('*')
+    .eq('lead_id', leadId)
+    .order('ts', { ascending: false })
+  if (error) throw new Error(error.message)
+  const entries = (data || []).map(r => ({
+    timestamp: r.ts
+      ? new Date(r.ts).toLocaleString('en-US', { month: '2-digit', day: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' })
+      : '',
+    action:  r.action   || '',
+    rep_id:  r.rep_id   || '',
+    status:  r.status   || '',
+    notes:   r.notes    || '',
+  }))
+  return { entries, leadId }
+}
+
+// ── Leads — writes ────────────────────────────────────────────────────────────
+
+export async function claimLead(leadId, repId, repName, location, zip) {
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('leads')
+    .update({
+      assigned_rep:     repName || repId,
+      assigned_rep_id:  repId,
+      assigned_week:    now.slice(0, 10),
+      status:           'No Contact',
+      claimed_at:       now,
+      status_changed_at: now,
+    })
+    .eq('id', leadId)
+    .is('assigned_rep_id', null)
+    .select('id')
+  if (error) throw new Error(error.message)
+  if (!data.length) throw new Error('Lead was just claimed by someone else.')
+  await insertLog('claim', leadId, repId)
+  return { ok: true, leadId, repId }
+}
+
+export async function claimLeadsBulk(leadIds, repId, repName, zip) {
+  const now = new Date().toISOString()
+  const { data, error } = await supabase
+    .from('leads')
+    .update({
+      assigned_rep:     repName || repId,
+      assigned_rep_id:  repId,
+      assigned_week:    now.slice(0, 10),
+      status:           'No Contact',
+      claimed_at:       now,
+      status_changed_at: now,
+    })
+    .in('id', leadIds)
+    .is('assigned_rep_id', null)
+    .select('id')
+  if (error) throw new Error(error.message)
+  const claimed = (data || []).map(r => r.id)
+  if (claimed.length) {
+    await supabase.from('activity_log').insert(
+      claimed.map(id => ({ action: 'bulk_claim', lead_id: id, rep_id: repId }))
+    )
+  }
+  return { ok: true, claimed, skipped: leadIds.filter(id => !claimed.includes(id)) }
+}
+
+export async function unassignLead(leadId, zip) {
+  const { error } = await supabase
+    .from('leads')
+    .update({
+      assigned_rep:     null,
+      assigned_rep_id:  null,
+      assigned_week:    null,
+      status:           'No Contact',
+      claimed_at:       null,
+      status_changed_at: null,
+    })
+    .eq('id', leadId)
+  if (error) throw new Error(error.message)
+  await insertLog('unassign', leadId, '')
+  return { ok: true, leadId }
+}
+
+export async function unassignLeadsBulk(leadIds, repId, zip) {
+  const { data, error } = await supabase
+    .from('leads')
+    .update({
+      assigned_rep:     null,
+      assigned_rep_id:  null,
+      assigned_week:    null,
+      status:           'No Contact',
+      claimed_at:       null,
+      status_changed_at: null,
+    })
+    .in('id', leadIds)
+    .eq('assigned_rep_id', repId)
+    .select('id')
+  if (error) throw new Error(error.message)
+  const released = (data || []).map(r => r.id)
+  if (released.length) {
+    await supabase.from('activity_log').insert(
+      released.map(id => ({ action: 'bulk_unassign', lead_id: id, rep_id: repId }))
+    )
+  }
+  return { ok: true, released }
+}
+
+export async function assignLead(leadId, repId, repName, zip) {
+  const now = new Date().toISOString()
+  const { error } = await supabase
+    .from('leads')
+    .update({
+      assigned_rep:    repName || repId,
+      assigned_rep_id: repId,
+      assigned_week:   now.slice(0, 10),
+      claimed_at:      now,
+    })
+    .eq('id', leadId)
+  if (error) throw new Error(error.message)
+  await insertLog('admin_assign', leadId, repId, '', `Assigned to ${repName || repId}`)
+  return { ok: true, leadId, repId }
+}
+
+export async function updateLeadStatus(leadId, status, notes, repId, zip) {
+  const now = new Date().toISOString()
+  const { error } = await supabase
+    .from('leads')
+    .update({ status, status_changed_at: now })
+    .eq('id', leadId)
+  if (error) throw new Error(error.message)
+  await insertLog('status_update', leadId, repId || '', status, notes || '')
+  return { ok: true, leadId, status }
+}
+
+export async function updateLeadProfile(leadId, fields, repId) {
+  const updates = {}
+  if (fields.owner_name !== undefined) updates.owner_name = fields.owner_name
+  if (fields.phone      !== undefined) updates.phone      = fields.phone
+  if (fields.email      !== undefined) updates.email      = fields.email
+  if (fields.insurance  !== undefined) updates.insurance  = fields.insurance
+  if (fields.notes      !== undefined) updates.notes      = fields.notes
+  if (fields.status     !== undefined) {
+    updates.status = fields.status
+    updates.status_changed_at = new Date().toISOString()
+  }
+  if (Object.keys(updates).length) {
+    const { error } = await supabase.from('leads').update(updates).eq('id', leadId)
+    if (error) throw new Error(error.message)
+  }
+  const logs = []
+  if (fields.notes !== undefined)
+    logs.push({ action: 'note', lead_id: leadId, rep_id: repId || '', notes: String(fields.notes) })
+  const LABELS = { owner_name: 'Owner', phone: 'Phone', email: 'Email', insurance: 'Insurance' }
+  const editParts = Object.keys(fields).filter(k => LABELS[k]).map(k => `${LABELS[k]}: ${fields[k]}`)
+  if (editParts.length)
+    logs.push({ action: 'edit', lead_id: leadId, rep_id: repId || '', notes: editParts.join(', ') })
+  if (logs.length) await supabase.from('activity_log').insert(logs)
+  return { ok: true, leadId }
+}
+
+export async function unassignAll() {
+  const { error } = await supabase
+    .from('leads')
+    .update({
+      assigned_rep: null, assigned_rep_id: null, assigned_week: null,
+      status: 'No Contact', claimed_at: null, status_changed_at: null,
+    })
+    .not('assigned_rep_id', 'is', null)
+  if (error) throw new Error(error.message)
+  return { ok: true }
+}
+
+export async function logActivity(entry) {
+  await insertLog(entry.action || 'event', entry.leadId, entry.repId, entry.status, entry.notes)
+  return { ok: true }
+}
