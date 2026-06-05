@@ -286,3 +286,61 @@ export async function logActivity(entry) {
   await insertLog(entry.action || 'event', entry.leadId, entry.repId, entry.status, entry.notes)
   return { ok: true }
 }
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+
+export async function getDashboardStats() {
+  const FOLLOW_UP_MS = 30 * 24 * 60 * 60 * 1000
+  const now = Date.now()
+
+  const [{ data: leads, error: e1 }, { data: reps, error: e2 }] = await Promise.all([
+    supabase.from('leads')
+      .select('id, assigned_rep_id, status, status_changed_at')
+      .eq('bucket', 'ACTIVE'),
+    supabase.from('reps')
+      .select('id, name, slug')
+      .eq('active', true)
+      .order('name'),
+  ])
+  if (e1) throw new Error(e1.message)
+  if (e2) throw new Error(e2.message)
+
+  const totals = { total: leads.length, open: 0, claimed: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }
+  const repMap = {}
+
+  for (const lead of leads) {
+    const status   = lead.status || 'No Contact'
+    const assigned = !!lead.assigned_rep_id
+    const isFollowUp = status === 'Contacted' && lead.status_changed_at &&
+      (now - new Date(lead.status_changed_at).getTime()) > FOLLOW_UP_MS
+
+    if (!assigned) { totals.open++; continue }
+
+    const key = lead.assigned_rep_id
+    if (!repMap[key]) repMap[key] = { claimed: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }
+    const r = repMap[key]
+
+    if (status === 'No Contact')     { totals.claimed++;   r.claimed++   }
+    else if (isFollowUp)             { totals.follow_up++; r.follow_up++ }
+    else if (status === 'Contacted') { totals.contacted++; r.contacted++ }
+    else if (status === 'Working')   { totals.working++;   r.working++   }
+    else if (status === 'Closed')    { totals.closed++;    r.closed++    }
+  }
+
+  const repStats = (reps || []).map(r => ({
+    id: r.id, name: r.name, slug: r.slug,
+    ...(repMap[r.id] || { claimed: 0, contacted: 0, follow_up: 0, working: 0, closed: 0 }),
+  }))
+
+  return { totals, repStats }
+}
+
+export async function getRecentActivity(limit = 20) {
+  const { data, error } = await supabase
+    .from('activity_log')
+    .select('id, ts, action, lead_id, rep_id, status, notes')
+    .order('ts', { ascending: false })
+    .limit(limit)
+  if (error) throw new Error(error.message)
+  return { entries: data || [] }
+}
