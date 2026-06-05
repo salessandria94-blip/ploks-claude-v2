@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
-import { getZipList, getAllReps, getAllLeads, assignLead, unassignLead } from '../api/sheets.js'
-import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2 } from 'lucide-react'
+import { getZipList, getAllReps, getAllLeads, assignLead, unassignLead, updateLeadProfile, getLeadActivity } from '../api/sheets.js'
+import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList } from 'lucide-react'
 
 const SATELLITE_TILE = {
   url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
@@ -206,40 +206,145 @@ function AssignDropdown({ lead, reps, busy, onAssign, onUnassign, dropUp }) {
 
 // ── Bottom panels ──────────────────────────────────────────────────────────
 
-function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose }) {
+const LEAD_STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
+
+function PanelInput({ label, value, onChange, placeholder }) {
   return (
-    <div className="shrink-0 border-t border-slate-800 bg-slate-900 max-h-72 overflow-auto">
+    <div className="flex flex-col gap-1">
+      <label className="text-[11px] text-slate-500 uppercase tracking-wide">{label}</label>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder || ''}
+        className="bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 placeholder:text-slate-600"
+      />
+    </div>
+  )
+}
+
+function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLeadUpdate }) {
+  const [form, setForm] = useState({
+    owner_name: lead.owner_name || '', phone: lead.phone || '',
+    email: lead.email || '', insurance: lead.insurance || '', notes: lead.notes || '',
+  })
+  const [status, setStatus] = useState(lead.status || '')
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [logOpen, setLogOpen] = useState(false)
+  const [activity, setActivity] = useState([])
+  const [loadingLog, setLoadingLog] = useState(false)
+
+  useEffect(() => {
+    setForm({ owner_name: lead.owner_name || '', phone: lead.phone || '',
+      email: lead.email || '', insurance: lead.insurance || '', notes: lead.notes || '' })
+    setStatus(lead.status || '')
+    setLogOpen(false); setActivity([])
+  }, [lead.id])
+
+  async function handleSave() {
+    const fields = {}
+    if (form.owner_name !== (lead.owner_name || '')) fields.owner_name = form.owner_name
+    if (form.phone      !== (lead.phone || ''))      fields.phone = form.phone
+    if (form.email      !== (lead.email || ''))      fields.email = form.email
+    if (form.insurance  !== (lead.insurance || ''))  fields.insurance = form.insurance
+    if (form.notes      !== (lead.notes || ''))      fields.notes = form.notes
+    if (status          !== (lead.status || ''))     fields.status = status
+    if (!Object.keys(fields).length) return
+    setSaving(true)
+    try {
+      await updateLeadProfile(lead.id, fields, 'admin')
+      onLeadUpdate(lead.id, fields)
+      setSaved(true); setTimeout(() => setSaved(false), 2000)
+    } catch (e) { alert('Save failed: ' + e.message) }
+    finally { setSaving(false) }
+  }
+
+  async function openLog() {
+    setLogOpen(v => !v)
+    if (activity.length > 0 || logOpen) return
+    setLoadingLog(true)
+    try { const r = await getLeadActivity(lead.id); setActivity(r.entries || []) }
+    catch (e) { setActivity([{ action: 'error', notes: e.message, timestamp: '' }]) }
+    finally { setLoadingLog(false) }
+  }
+
+  return (
+    <div className="shrink-0 border-t border-slate-800 bg-slate-900 overflow-auto" style={{ maxHeight: '55vh' }}>
       <div className="p-4">
+        {/* Header */}
         <div className="flex items-start justify-between mb-3">
           <div>
-            <div className="text-white font-semibold text-base leading-tight">{lead.address}</div>
-            <div className="text-slate-400 text-xs mt-1">
-              ZIP {lead.zip}{lead.bucket ? ` · ${lead.bucket}` : ''}{lead.status ? ` · ${lead.status}` : ''}
+            <div className="text-white font-semibold text-base">{lead.address}</div>
+            <div className="text-slate-400 text-xs mt-0.5">
+              ZIP {lead.zip}{lead.roof_age ? ` · ${lead.roof_age} yr roof` : ''}{lead.job_type ? ` · ${lead.job_type}` : ''}
+            </div>
+            <div className="text-xs mt-0.5">
+              {lead.assigned_rep
+                ? <span className="text-orange-400">Assigned to {lead.assigned_rep}</span>
+                : <span className="text-blue-400">Open</span>}
             </div>
           </div>
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1"><X size={18} /></button>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-sm">
-          <Fact label="Owner" value={lead.owner_name} />
-          <Fact label="Roof Age" value={lead.roof_age ? `${lead.roof_age} yr` : ''} />
-          <Fact label="Job Type" value={lead.job_type} />
-          <Fact label="Assigned" value={lead.assigned_rep} valueClass={lead.assigned_rep ? 'text-orange-400' : ''} />
-        </div>
-
-        <div className="max-w-xs">
+        {/* Assign */}
+        <div className="mb-3 max-w-xs">
           <AssignDropdown lead={lead} reps={reps} busy={busy} onAssign={onAssign} onUnassign={onUnassign} />
         </div>
-      </div>
-    </div>
-  )
-}
 
-function Fact({ label, value, valueClass }) {
-  return (
-    <div>
-      <div className="text-slate-500 text-xs uppercase tracking-wide">{label}</div>
-      <div className={`text-slate-200 mt-0.5 ${valueClass || ''}`}>{value || '—'}</div>
+        {/* Status quick buttons */}
+        <div className="flex flex-wrap gap-1.5 mb-3">
+          {LEAD_STATUSES.map(s => (
+            <button key={s} onClick={() => setStatus(s)}
+              className={`text-xs px-2.5 py-1.5 rounded-lg font-medium transition-colors ${status === s ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}>
+              {s}
+            </button>
+          ))}
+        </div>
+
+        {/* Editable fields */}
+        <div className="grid grid-cols-2 gap-3 mb-3">
+          <PanelInput label="Owner"     value={form.owner_name} onChange={v => setForm(f => ({ ...f, owner_name: v }))} />
+          <PanelInput label="Phone"     value={form.phone}      onChange={v => setForm(f => ({ ...f, phone: v }))}      placeholder="(000) 000-0000" />
+          <PanelInput label="Email"     value={form.email}      onChange={v => setForm(f => ({ ...f, email: v }))}      placeholder="email@domain.com" />
+          <PanelInput label="Insurance" value={form.insurance}  onChange={v => setForm(f => ({ ...f, insurance: v }))}  placeholder="Carrier" />
+        </div>
+
+        {/* Notes */}
+        <div className="flex flex-col gap-1 mb-3">
+          <label className="text-[11px] text-slate-500 uppercase tracking-wide">Notes</label>
+          <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+            placeholder="Current notes…" rows={3}
+            className="bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 resize-none placeholder:text-slate-600" />
+        </div>
+
+        {/* Save + Log */}
+        <div className="flex items-center gap-3">
+          <button onClick={handleSave} disabled={saving}
+            className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium">
+            {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save changes'}
+          </button>
+          <button onClick={openLog} className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg text-slate-500 hover:text-slate-300">
+            <ClipboardList size={14} /> Log
+          </button>
+        </div>
+
+        {/* Log */}
+        {logOpen && (
+          <div className="mt-3 bg-slate-950 border border-slate-800 rounded-xl p-3">
+            <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Activity — {lead.address}</div>
+            {loadingLog && <div className="text-slate-500 text-xs">Loading…</div>}
+            {!loadingLog && activity.length === 0 && <div className="text-slate-600 text-xs">No activity yet.</div>}
+            {!loadingLog && activity.map((e, i) => (
+              <div key={i} className="flex gap-3 text-xs border-b border-slate-800 pb-2 mb-2 last:border-0 last:mb-0">
+                <div className="text-slate-600 whitespace-nowrap shrink-0 w-24">{e.timestamp}</div>
+                <div className="text-slate-400 shrink-0 w-20">{e.action}</div>
+                <div className="text-slate-300">{e.notes || e.status || '—'}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }
@@ -593,6 +698,7 @@ export default function MapPage() {
           onAssign={handleAssign}
           onUnassign={handleUnassign}
           onClose={clearSelection}
+          onLeadUpdate={patchLead}
         />
       )}
       {!selectedLead && selectedLeads.length > 0 && (
