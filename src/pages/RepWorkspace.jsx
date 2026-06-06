@@ -363,6 +363,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   }
 
   const handleAreaSelect = useCallback((sel, geometry) => {
+    setTool(null) // always untoggle the drawing tool so the rep can pan immediately
     // If a ZIP is loaded, filter the loaded leads normally
     if (selectedZip) { setSelectedLead(null); setSelectedLeads(sel); return }
     // No ZIP — trigger a geo-search using the drawn geometry
@@ -412,8 +413,8 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
       {error && <div className="text-red-400 text-xs px-3 py-1.5 bg-red-950/30 shrink-0">{error}</div>}
 
       {/* Map */}
-      <div className="relative flex-1 min-h-0">
-        <MapContainer ref={mapRef} center={JACKSONVILLE_CENTER} zoom={12} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+      <div className="relative flex-1 min-h-0 bg-[#020617]">
+        <MapContainer ref={mapRef} center={JACKSONVILLE_CENTER} zoom={12} style={{ height: '100%', width: '100%', background: '#020617' }} zoomControl={false}>
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
           <FitBounds leads={geoLeads} />
           <CenterOnLead lead={selectedLead} />
@@ -492,13 +493,24 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
                 <Loader2 size={12} className="animate-spin" /> Searching area…
               </div>
             )}
-            {!geoLoading && !geoErr && geoLeadsSearch.length > 0 && (
-              <div className="bg-purple-900/90 text-purple-100 text-xs px-3 py-1.5 rounded-lg shadow-lg">
-                {geoLeadsSearch.length} lead{geoLeadsSearch.length === 1 ? '' : 's'} in area
-                {' · '}
-                <button className="underline pointer-events-auto" onClick={clearGeoSearch}>clear</button>
-              </div>
-            )}
+            {!geoLoading && !geoErr && geoLeadsSearch.length > 0 && (() => {
+              const openGeo = geoLeadsSearch.filter(l => relationOf(l, rep.id) === 'open')
+              return (
+                <div className="bg-purple-900/90 text-purple-100 text-xs px-3 py-2 rounded-xl shadow-lg flex items-center gap-2 pointer-events-auto">
+                  <span className="text-purple-200">{geoLeadsSearch.length} leads in area</span>
+                  {openGeo.length > 0 && (
+                    <button
+                      onClick={() => { bulkClaim(openGeo); clearGeoSearch() }}
+                      disabled={bulkBusy}
+                      className="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-semibold px-3 py-1 rounded-lg text-xs"
+                    >
+                      {bulkBusy ? 'Claiming…' : `Claim ${openGeo.length}`}
+                    </button>
+                  )}
+                  <button className="text-purple-300 hover:text-purple-100 underline text-xs" onClick={clearGeoSearch}>clear</button>
+                </div>
+              )
+            })()}
             {geoErr && (
               <div className="bg-red-900/90 text-red-100 text-xs px-3 py-1.5 rounded-lg shadow-lg">{geoErr}</div>
             )}
@@ -550,25 +562,27 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
             </div>
           </div>
         )}
-      </div>
 
-      {/* Selected lead — full profile below the map */}
-      {panelOpen && (
-        <RepLeadProfile
-          lead={selectedLead}
-          rel={relationOf(selectedLead, rep.id)}
-          reps={reps}
-          meId={rep.id}
-          busy={busy === selectedLead.id}
-          onClose={() => setSelectedLead(null)}
-          onClaim={() => claimOne(selectedLead)}
-          onRelease={() => releaseOne(selectedLead)}
-          onStatus={s => setStatus(selectedLead, s)}
-          onSave={fields => saveProfile(selectedLead, fields)}
-          onTransfer={toRep => transfer(selectedLead, toRep)}
-          onNavigate={() => openNavigate(selectedLead)}
-        />
-      )}
+        {/* Selected lead — overlay panel, bottom sheet over the map */}
+        {panelOpen && (
+          <div className="absolute bottom-0 left-0 right-0 z-[999] bg-slate-900/95 border-t border-slate-700 rounded-t-2xl shadow-2xl overflow-auto" style={{ maxHeight: '58%' }}>
+            <RepLeadProfile
+              lead={selectedLead}
+              rel={relationOf(selectedLead, rep.id)}
+              reps={reps}
+              meId={rep.id}
+              busy={busy === selectedLead.id}
+              onClose={() => setSelectedLead(null)}
+              onClaim={() => claimOne(selectedLead)}
+              onRelease={() => releaseOne(selectedLead)}
+              onStatus={s => setStatus(selectedLead, s)}
+              onSave={fields => saveProfile(selectedLead, fields)}
+              onTransfer={toRep => transfer(selectedLead, toRep)}
+              onNavigate={() => openNavigate(selectedLead)}
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
