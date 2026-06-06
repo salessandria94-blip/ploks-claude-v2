@@ -154,12 +154,12 @@ function RepLogin({ lockedSlug, onUnlock }) {
 
 // Keep the Leaflet canvas correctly sized when the tab is shown or the
 // bottom profile panel opens/closes.
-function MapResizer({ active, panelOpen }) {
+function MapResizer({ active }) {
   const map = useMap()
   useEffect(() => {
     const t = setTimeout(() => map.invalidateSize(), 160)
     return () => clearTimeout(t)
-  }, [active, panelOpen, map])
+  }, [active, map])
   return null
 }
 
@@ -419,7 +419,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
           <FitBounds leads={geoLeads} />
           <CenterOnLead lead={selectedLead} />
-          <MapResizer active={active} panelOpen={panelOpen} />
+          <MapResizer active={active} />
           <ClickToClear enabled={!tool} onClear={() => { setSelectedLead(null); setSelectedLeads([]) }} />
           <DrawTool tool={tool} leads={displayLeads} onSelect={handleAreaSelect} />
           {geoAnchor && (
@@ -562,23 +562,30 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
           </div>
         )}
 
-        {/* Selected lead — overlay panel, bottom sheet over the map */}
+        {/* Selected lead — floating bottom sheet over the map */}
         {panelOpen && (
-          <div className="absolute bottom-0 left-0 right-0 z-[999] bg-slate-900/95 border-t border-slate-700 rounded-t-2xl shadow-2xl overflow-auto" style={{ maxHeight: '58%' }}>
-            <RepLeadProfile
-              lead={selectedLead}
-              rel={relationOf(selectedLead, rep.id)}
-              reps={reps}
-              meId={rep.id}
-              busy={busy === selectedLead.id}
-              onClose={() => setSelectedLead(null)}
-              onClaim={() => claimOne(selectedLead)}
-              onRelease={() => releaseOne(selectedLead)}
-              onStatus={s => setStatus(selectedLead, s)}
-              onSave={fields => saveProfile(selectedLead, fields)}
-              onTransfer={toRep => transfer(selectedLead, toRep)}
-              onNavigate={() => openNavigate(selectedLead)}
-            />
+          <div className="absolute bottom-0 left-0 right-0 z-[999] pointer-events-none">
+            <div className="mx-2 mb-2 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto bg-slate-900 border border-slate-700" style={{ maxHeight: '52vh' }}>
+              <div className="flex justify-center pt-2 pb-1 bg-slate-900">
+                <div className="w-10 h-1 rounded-full bg-slate-600" />
+              </div>
+              <div className="overflow-auto" style={{ maxHeight: 'calc(52vh - 24px)' }}>
+                <RepLeadProfile
+                  lead={selectedLead}
+                  rel={relationOf(selectedLead, rep.id)}
+                  reps={reps}
+                  meId={rep.id}
+                  busy={busy === selectedLead.id}
+                  onClose={() => setSelectedLead(null)}
+                  onClaim={() => claimOne(selectedLead)}
+                  onRelease={() => releaseOne(selectedLead)}
+                  onStatus={s => setStatus(selectedLead, s)}
+                  onSave={fields => saveProfile(selectedLead, fields)}
+                  onTransfer={toRep => transfer(selectedLead, toRep)}
+                  onNavigate={() => openNavigate(selectedLead)}
+                />
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -807,8 +814,10 @@ function RepLeads({ rep, leads, reps, loading, error, sub, setSub, onReload, onP
 
   const followupCount = leads.filter(isFollowup).length
   const list = sub === 'followup' ? leads.filter(isFollowup)
-    : sub === 'all' ? leads
-    : leads.filter(l => !isFollowup(l))
+    : sub === 'contacted' ? leads.filter(l => (l.status || '').toLowerCase() === 'contacted')
+    : sub === 'working'   ? leads.filter(l => (l.status || '').toLowerCase() === 'working')
+    : sub === 'closed'    ? leads.filter(l => (l.status || '').toLowerCase() === 'closed')
+    : leads
 
   if (openLead) {
     return (
@@ -833,13 +842,21 @@ function RepLeads({ rep, leads, reps, loading, error, sub, setSub, onReload, onP
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-800 bg-slate-900 shrink-0">
-        {['active', 'followup', 'all'].map(s => (
-          <button key={s} onClick={() => setSub(s)}
-            className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${sub === s ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
-            {s === 'active' ? 'Active' : s === 'followup' ? `Follow-up${followupCount ? ` (${followupCount})` : ''}` : 'All'}
-          </button>
-        ))}
-        <button onClick={onReload} disabled={loading} className="ml-auto text-slate-400 hover:text-slate-200">
+        <div className="flex gap-1.5 overflow-x-auto no-scrollbar flex-1 min-w-0">
+          {[
+            { id: 'all',       label: 'My Leads' },
+            { id: 'contacted', label: 'Contacted' },
+            { id: 'working',   label: 'Working' },
+            { id: 'closed',    label: 'Closed' },
+            { id: 'followup',  label: followupCount ? `Follow Up (${followupCount})` : 'Follow Up' },
+          ].map(t => (
+            <button key={t.id} onClick={() => setSub(t.id)}
+              className={`shrink-0 text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${sub === t.id ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <button onClick={onReload} disabled={loading} className="shrink-0 text-slate-400 hover:text-slate-200">
           <RefreshCw size={15} className={loading ? 'animate-spin text-blue-400' : ''} />
         </button>
       </div>
@@ -850,7 +867,7 @@ function RepLeads({ rep, leads, reps, loading, error, sub, setSub, onReload, onP
         {loading && leads.length === 0 && <div className="text-slate-400 text-sm p-4">Loading your leads…</div>}
         {!loading && list.length === 0 && (
           <div className="text-center py-16 text-slate-500 text-sm">
-            {sub === 'followup' ? 'No follow-ups right now.' : 'No leads yet — claim some on the Map.'}
+            {sub === 'followup' ? 'No follow-ups right now.' : sub === 'all' ? 'No leads yet — claim some on the Map.' : `No ${sub} leads.`}
           </div>
         )}
         {list.map(lead => {
@@ -995,7 +1012,7 @@ export default function RepWorkspace() {
   const [loadingMine, setLoadingMine] = useState(false)
   const [mineLoaded, setMineLoaded] = useState(false)
   const [mineError, setMineError] = useState('')
-  const [leadsSub, setLeadsSub] = useState('active')
+  const [leadsSub, setLeadsSub] = useState('all')
 
   const loadMine = useCallback(async () => {
     if (!rep) return
