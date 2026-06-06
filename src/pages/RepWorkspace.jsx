@@ -332,6 +332,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
       targets.forEach(l => { if (claimed.has(l.id)) onMineAdd(applyPatch(l)) })
       const failed = targets.length - claimed.size
       if (failed > 0) setError(`${claimed.size} claimed, ${failed} skipped (already taken or cap).`)
+      if (!selectedZip) setMapLayer('mine')
     } catch (err) { setError(err.message) }
     finally { setBulkBusy(false); setSelectedLeads([]) }
   }
