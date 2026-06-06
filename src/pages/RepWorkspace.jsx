@@ -496,18 +496,16 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
             {!geoLoading && !geoErr && geoLeadsSearch.length > 0 && (() => {
               const openGeo = geoLeadsSearch.filter(l => relationOf(l, rep.id) === 'open')
               return (
-                <div className="bg-purple-900/90 text-purple-100 text-xs px-3 py-2 rounded-xl shadow-lg flex items-center gap-2 pointer-events-auto">
-                  <span className="text-purple-200">{geoLeadsSearch.length} leads in area</span>
+                <div className="pointer-events-auto">
                   {openGeo.length > 0 && (
                     <button
                       onClick={() => { bulkClaim(openGeo); clearGeoSearch() }}
                       disabled={bulkBusy}
-                      className="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-semibold px-3 py-1 rounded-lg text-xs"
+                      className="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-xl shadow-lg text-sm"
                     >
                       {bulkBusy ? 'Claiming…' : `Claim ${openGeo.length}`}
                     </button>
                   )}
-                  <button className="text-purple-300 hover:text-purple-100 underline text-xs" onClick={clearGeoSearch}>clear</button>
                 </div>
               )
             })()}
