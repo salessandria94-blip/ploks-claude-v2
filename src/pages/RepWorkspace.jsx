@@ -1251,7 +1251,9 @@ function RepCalendar({ rep, myLeads, active }) {
                 <div className="flex items-center justify-between bg-blue-900/40 border border-blue-700 rounded-lg px-3 py-2">
                   <div>
                     <div className="text-slate-100 text-sm font-medium">{leadSelected.address}</div>
-                    <div className="text-slate-400 text-xs">{leadSelected.status} · ZIP {leadSelected.zip}</div>
+                    <div className="text-slate-400 text-xs">
+                      {[leadSelected.owner_name, leadSelected.phone, leadSelected.status, `ZIP ${leadSelected.zip}`].filter(Boolean).join(' · ')}
+                    </div>
                   </div>
                   <button onClick={() => { setLeadSelected(null); setLeadSearch(''); setAddForm(f => ({ ...f, lead_id: '' })) }}
                     className="text-slate-500 hover:text-slate-300 ml-2"><X size={14} /></button>
@@ -1272,7 +1274,9 @@ function RepCalendar({ rep, myLeads, active }) {
                         <button key={l.id} onClick={() => { setLeadSelected(l); setAddForm(f => ({ ...f, lead_id: l.id })); setLeadSearch('') }}
                           className="w-full text-left px-3 py-2.5 hover:bg-slate-700 border-b border-slate-700/50 last:border-0">
                           <div className="text-slate-100 text-sm">{l.address}</div>
-                          <div className="text-slate-500 text-xs">{l.status} · ZIP {l.zip}</div>
+                          <div className="text-slate-500 text-xs">
+                            {[l.owner_name, l.phone, l.status, `ZIP ${l.zip}`].filter(Boolean).join(' · ')}
+                          </div>
                         </button>
                       ))}
                     </div>
