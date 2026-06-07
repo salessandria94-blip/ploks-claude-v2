@@ -346,3 +346,40 @@ export async function getRecentActivity(limit = 20) {
   if (error) throw new Error(error.message)
   return { entries: data || [] }
 }
+
+// ── Appointments ──────────────────────────────────────────────────────────────
+
+export async function createAppointment(leadId, repId, scheduledAt, notes) {
+  const { data, error } = await supabase
+    .from('appointments')
+    .insert({ lead_id: String(leadId), rep_id: String(repId), scheduled_at: scheduledAt, notes: notes || null })
+    .select('*')
+    .single()
+  if (error) throw new Error(error.message)
+  return { ok: true, appointment: data }
+}
+
+export async function getAppointmentsForRep(repId) {
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('*, leads(address, zip, status)')
+    .eq('rep_id', String(repId))
+    .order('scheduled_at', { ascending: true })
+  if (error) throw new Error(error.message)
+  return { appointments: data || [] }
+}
+
+export async function getAppointmentsForAdmin() {
+  const { data, error } = await supabase
+    .from('appointments')
+    .select('*, leads(address, zip, status), reps(name)')
+    .order('scheduled_at', { ascending: true })
+  if (error) throw new Error(error.message)
+  return { appointments: data || [] }
+}
+
+export async function deleteAppointment(id) {
+  const { error } = await supabase.from('appointments').delete().eq('id', id)
+  if (error) throw new Error(error.message)
+  return { ok: true }
+}

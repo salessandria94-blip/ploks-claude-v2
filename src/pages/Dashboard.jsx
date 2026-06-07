@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp } from 'lucide-react'
-import { getDashboardStats, getRecentActivity } from '../api/sheets.js'
+import { RefreshCw, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
+import { getDashboardStats, getRecentActivity, getAppointmentsForAdmin } from '../api/sheets.js'
 
 const CAP = 500
 
@@ -242,6 +242,78 @@ function ZipLeaderboardCard({ zipStats }) {
   )
 }
 
+function UpcomingAppointmentsCard() {
+  const [appointments, setAppointments] = useState([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getAppointmentsForAdmin()
+      .then(r => setAppointments(r.appointments || []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const now = new Date()
+  const todayStr = now.toISOString().slice(0, 10)
+  const cutoff   = new Date(now.getTime() + 7 * 86400000)
+
+  const upcoming = appointments.filter(a => {
+    const d = new Date(a.scheduled_at)
+    return d >= now && d <= cutoff
+  })
+
+  const byDay = {}
+  upcoming.forEach(a => {
+    const day = a.scheduled_at.slice(0, 10)
+    if (!byDay[day]) byDay[day] = []
+    byDay[day].push(a)
+  })
+  const days = Object.keys(byDay).sort()
+
+  return (
+    <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-4">
+        <div className="flex items-center gap-2">
+          <Calendar size={15} className="text-blue-400" />
+          <h2 className="text-slate-100 font-semibold text-sm uppercase tracking-wider">Upcoming Appointments</h2>
+        </div>
+        <span className="text-xs text-slate-500">{upcoming.length} this week</span>
+      </div>
+
+      {loading && <div className="px-5 pb-4 text-slate-500 text-sm">Loading…</div>}
+
+      {!loading && upcoming.length === 0 && (
+        <div className="px-5 pb-4 text-slate-500 text-sm">No appointments in the next 7 days.</div>
+      )}
+
+      {!loading && days.length > 0 && (
+        <div className="px-5 pb-5 flex flex-col gap-4">
+          {days.map(day => (
+            <div key={day}>
+              <div className="text-xs text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
+                {day === todayStr
+                  ? '🟢 Today'
+                  : new Date(day + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {byDay[day].map(a => (
+                  <div key={a.id} className="flex items-center gap-3 text-sm bg-slate-800/50 rounded-lg px-3 py-2">
+                    <span className="text-slate-400 text-xs font-mono w-16 shrink-0">
+                      {new Date(a.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                    </span>
+                    <span className="text-slate-100 truncate flex-1">{a.leads?.address || '—'}</span>
+                    <span className="text-blue-300 text-xs shrink-0">{a.reps?.name || '—'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function timeAgo(ts, now) {
   if (!ts) return ''
   const diff = now - new Date(ts).getTime()
@@ -366,6 +438,9 @@ export default function Dashboard() {
         <div className="text-slate-500 text-sm">Loading...</div>
       ) : stats ? (
         <div className="flex flex-col gap-6">
+
+          {/* Upcoming appointments */}
+          <UpcomingAppointmentsCard />
 
           {/* Market overview */}
           <MarketOverviewCard totals={stats.totals} />

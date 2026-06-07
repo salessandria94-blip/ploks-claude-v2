@@ -10,8 +10,9 @@ import {
   validatePin, getAllReps, getZipList, getAllLeads, getLeadsForRep, claimLead, unassignLead,
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
   claimLeadsBulk, unassignLeadsBulk, getLeadsNearPin, getLeadsInBounds,
+  createAppointment, getAppointmentsForRep, deleteAppointment,
 } from '../api/sheets.js'
-import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu } from 'lucide-react'
+import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
@@ -65,6 +66,22 @@ function expiresInDays(l) {
   if (d == null) return null
   return Math.max(0, Math.ceil(7 - d))
 }
+// ── Calendar helpers ──────────────────────────────────────────────────────────
+const CAL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
+const CAL_DOW    = ['Su','Mo','Tu','We','Th','Fr','Sa']
+function calDateStr(d) {
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
+function calFmtTime(iso) {
+  if (!iso) return ''
+  return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+}
+function calFmtDay(dateStr) {
+  const [y,m,d] = dateStr.split('-').map(Number)
+  return new Date(y, m-1, d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })
+}
+function todayStr() { return calDateStr(new Date()) }
+
 function statusBadgeClass(s) {
   const u = (s || '').toLowerCase()
   if (u === 'closed') return 'bg-green-900 text-green-300'
@@ -615,6 +632,10 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClos
   const [logOpen, setLogOpen] = useState(false)
   const [activity, setActivity] = useState([])
   const [loadingLog, setLoadingLog] = useState(false)
+  const [showSched, setShowSched] = useState(false)
+  const [schedForm, setSchedForm] = useState({ date: todayStr(), time: '09:00', notes: '' })
+  const [schedBusy, setSchedBusy] = useState(false)
+  const [schedDone, setSchedDone] = useState(false)
 
   useEffect(() => {
     setForm({
@@ -637,6 +658,17 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClos
       await onSave(fields)           // notes persist in the box (current value)
       setSaved(true); setTimeout(() => setSaved(false), 2000)
     } catch (e) { alert('Save failed: ' + e.message) } finally { setSaving(false) }
+  }
+
+  async function handleSchedule() {
+    if (!schedForm.date || !schedForm.time) return
+    setSchedBusy(true)
+    try {
+      const iso = new Date(`${schedForm.date}T${schedForm.time}:00`).toISOString()
+      await createAppointment(lead.id, meId, iso, schedForm.notes)
+      setSchedDone(true); setShowSched(false)
+      setTimeout(() => setSchedDone(false), 3000)
+    } catch (e) { alert('Error: ' + e.message) } finally { setSchedBusy(false) }
   }
 
   async function openLog() {
@@ -699,7 +731,39 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClos
           <button onClick={onNavigate} className="flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-white text-sm px-4 py-2.5 rounded-lg">
             <Navigation size={15} /> Navigate
           </button>
+          {rel === 'mine' && (
+            <button onClick={() => setShowSched(s => !s)}
+              className={`flex items-center justify-center gap-1.5 text-sm px-4 py-2.5 rounded-lg ${schedDone ? 'bg-green-700 text-white' : 'bg-slate-800 hover:bg-slate-700 text-white'}`}>
+              <Calendar size={15} /> {schedDone ? 'Scheduled ✓' : 'Schedule'}
+            </button>
+          )}
         </div>
+
+        {/* Inline schedule form */}
+        {showSched && (
+          <div className="bg-slate-800 border border-slate-700 rounded-xl p-3 mb-3">
+            <div className="text-xs text-slate-400 font-semibold uppercase tracking-wide mb-2">Schedule Appointment</div>
+            <div className="grid grid-cols-2 gap-2 mb-2">
+              <div>
+                <label className="text-[10px] text-slate-500 uppercase tracking-wide block mb-0.5">Date</label>
+                <input type="date" value={schedForm.date} onChange={e => setSchedForm(f => ({ ...f, date: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 text-slate-100 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="text-[10px] text-slate-500 uppercase tracking-wide block mb-0.5">Time</label>
+                <input type="time" value={schedForm.time} onChange={e => setSchedForm(f => ({ ...f, time: e.target.value }))}
+                  className="w-full bg-slate-900 border border-slate-700 text-slate-100 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500" />
+              </div>
+            </div>
+            <input type="text" value={schedForm.notes} onChange={e => setSchedForm(f => ({ ...f, notes: e.target.value }))}
+              placeholder="Notes (optional)"
+              className="w-full bg-slate-900 border border-slate-700 text-slate-100 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-blue-500 mb-2" />
+            <button onClick={handleSchedule} disabled={schedBusy}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-semibold py-1.5 rounded-lg">
+              {schedBusy ? 'Saving…' : 'Confirm'}
+            </button>
+          </div>
+        )}
 
         {/* Status quick buttons (mine) */}
         {rel === 'mine' && (
@@ -900,7 +964,7 @@ function HomeCard({ children, onClick, className = '' }) {
     : <div className={cls}>{children}</div>
 }
 
-function RepHome({ rep, leads, loading, error, onReload, onGoLeads }) {
+function RepHome({ rep, leads, loading, error, onReload, onGoLeads, appointments }) {
   const claims = leads.length
   const expiring = leads
     .map(l => ({ l, d: expiresInDays(l) }))
@@ -971,6 +1035,237 @@ function RepHome({ rep, leads, loading, error, onReload, onGoLeads }) {
           </div>
         </div>
       )}
+
+      {/* Upcoming appointments */}
+      {(() => {
+        const now = Date.now()
+        const upcoming = (appointments || [])
+          .filter(a => new Date(a.scheduled_at).getTime() >= now)
+          .slice(0, 5)
+        if (!upcoming.length) return null
+        return (
+          <div className="mt-4">
+            <div className="text-blue-400 text-xs uppercase tracking-wide mb-2">📅 Upcoming Appointments</div>
+            <div className="bg-slate-900 border border-slate-800 rounded-xl divide-y divide-slate-800 overflow-hidden">
+              {upcoming.map(a => (
+                <div key={a.id} className="flex items-center justify-between px-3 py-2.5">
+                  <div className="min-w-0">
+                    <div className="text-slate-100 text-sm truncate">{a.leads?.address || 'Lead'}</div>
+                    <div className="text-slate-500 text-[11px]">{calFmtTime(a.scheduled_at)}</div>
+                  </div>
+                  <span className="text-blue-400 text-xs whitespace-nowrap ml-2">
+                    {new Date(a.scheduled_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })()}
+    </div>
+  )
+}
+
+// ── Calendar tab ─────────────────────────────────────────────────────────────
+
+function RepCalendar({ rep, myLeads, active }) {
+  const today = todayStr()
+  const [appointments, setAppointments] = useState([])
+  const [loadingAppts, setLoadingAppts] = useState(false)
+  const [viewYear,  setViewYear]  = useState(() => new Date().getFullYear())
+  const [viewMonth, setViewMonth] = useState(() => new Date().getMonth())
+  const [selDay,    setSelDay]    = useState(today)
+  const [showAdd,   setShowAdd]   = useState(false)
+  const [addForm,   setAddForm]   = useState({ lead_id: '', date: today, time: '09:00', notes: '' })
+  const [addBusy,   setAddBusy]   = useState(false)
+
+  useEffect(() => { if (active) loadAppts() }, [active, rep.id])
+
+  async function loadAppts() {
+    setLoadingAppts(true)
+    try { const r = await getAppointmentsForRep(rep.id); setAppointments(r.appointments || []) }
+    catch (e) { console.error(e) } finally { setLoadingAppts(false) }
+  }
+
+  async function handleAdd() {
+    if (!addForm.lead_id || !addForm.date || !addForm.time) return
+    setAddBusy(true)
+    try {
+      const iso = new Date(`${addForm.date}T${addForm.time}:00`).toISOString()
+      await createAppointment(addForm.lead_id, rep.id, iso, addForm.notes)
+      await loadAppts()
+      setSelDay(addForm.date)
+      setShowAdd(false)
+      setAddForm({ lead_id: '', date: today, time: '09:00', notes: '' })
+    } catch (e) { alert('Error: ' + e.message) } finally { setAddBusy(false) }
+  }
+
+  async function handleDelete(id) {
+    try { await deleteAppointment(id); setAppointments(prev => prev.filter(a => a.id !== id)) }
+    catch (e) { alert('Error: ' + e.message) }
+  }
+
+  function prevMonth() {
+    if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1) }
+    else setViewMonth(m => m - 1)
+  }
+  function nextMonth() {
+    if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1) }
+    else setViewMonth(m => m + 1)
+  }
+
+  const firstDay    = new Date(viewYear, viewMonth, 1).getDay()
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate()
+
+  const apptsByDay = {}
+  appointments.forEach(a => {
+    const day = a.scheduled_at.slice(0, 10)
+    if (!apptsByDay[day]) apptsByDay[day] = []
+    apptsByDay[day].push(a)
+  })
+
+  const selAppts  = apptsByDay[selDay] || []
+  const followups = myLeads.filter(isFollowup)
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden">
+
+      {/* Month header */}
+      <div className="shrink-0 px-4 pt-4 pb-2 border-b border-slate-800">
+        <div className="flex items-center justify-between mb-3">
+          <button onClick={prevMonth} className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
+            <ChevronLeft size={16} />
+          </button>
+          <span className="text-slate-100 font-semibold text-sm">{CAL_MONTHS[viewMonth]} {viewYear}</span>
+          <button onClick={nextMonth} className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+
+        {/* Day-of-week headers */}
+        <div className="grid grid-cols-7 mb-1">
+          {CAL_DOW.map(d => (
+            <div key={d} className="text-center text-[11px] text-slate-500 font-medium py-1">{d}</div>
+          ))}
+        </div>
+
+        {/* Day cells */}
+        <div className="grid grid-cols-7 gap-y-0.5">
+          {Array.from({ length: firstDay }).map((_, i) => <div key={`e${i}`} />)}
+          {Array.from({ length: daysInMonth }).map((_, i) => {
+            const day = i + 1
+            const ds  = `${viewYear}-${String(viewMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+            const isToday = ds === today
+            const isSel   = ds === selDay
+            const hasAppt = !!apptsByDay[ds]
+            return (
+              <button key={ds} onClick={() => setSelDay(ds)}
+                className={`relative flex flex-col items-center justify-center h-9 rounded-lg text-sm font-medium transition-colors
+                  ${isSel ? 'bg-blue-600 text-white' : isToday ? 'bg-slate-800 text-blue-400' : 'text-slate-300 hover:bg-slate-800'}`}>
+                {day}
+                {hasAppt && <div className={`absolute bottom-1 w-1.5 h-1.5 rounded-full ${isSel ? 'bg-white' : 'bg-blue-400'}`} />}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Scrollable body */}
+      <div className="flex-1 overflow-auto min-h-0 px-4 pb-6">
+
+        {/* Selected day */}
+        <div className="mt-4 mb-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-xs text-slate-400 font-semibold uppercase tracking-wide">{calFmtDay(selDay)}{selDay === today ? ' · Today' : ''}</span>
+            <button onClick={() => { setAddForm(f => ({ ...f, date: selDay })); setShowAdd(true) }}
+              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 font-medium">
+              <Plus size={13} /> Add
+            </button>
+          </div>
+
+          {loadingAppts && <div className="text-slate-500 text-sm py-2">Loading…</div>}
+
+          {!loadingAppts && selAppts.length === 0 && (
+            <p className="text-slate-500 text-sm py-2">No appointments. Tap + Add or schedule from a lead card.</p>
+          )}
+
+          {selAppts.map(a => (
+            <div key={a.id} className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-start justify-between gap-2 mb-2">
+              <div className="min-w-0">
+                <div className="text-slate-100 text-sm font-medium truncate">{a.leads?.address || 'Lead'}</div>
+                <div className="text-slate-400 text-xs mt-0.5">{calFmtTime(a.scheduled_at)}{a.leads?.zip ? ` · ZIP ${a.leads.zip}` : ''}</div>
+                {a.notes && <div className="text-slate-500 text-xs mt-1 italic">{a.notes}</div>}
+              </div>
+              <button onClick={() => handleDelete(a.id)} className="text-slate-600 hover:text-red-400 shrink-0 p-0.5 mt-0.5">
+                <Trash2 size={14} />
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* Follow-ups needing attention */}
+        {followups.length > 0 && (
+          <div>
+            <div className="text-xs text-orange-400 font-semibold uppercase tracking-wide mb-2">
+              Needs Attention · {followups.length}
+            </div>
+            {followups.map(l => {
+              const d = Math.floor(daysSince(l.status_changed_at))
+              return (
+                <div key={l.id} className="bg-slate-900 border border-slate-800 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2 mb-1.5">
+                  <div className="min-w-0">
+                    <div className="text-slate-100 text-sm truncate">{l.address}</div>
+                    <div className="text-slate-500 text-xs mt-0.5">ZIP {l.zip}</div>
+                  </div>
+                  <span className="text-orange-400 text-xs shrink-0">contacted {d}d ago</span>
+                </div>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Add appointment modal */}
+      {showAdd && (
+        <div className="fixed inset-0 z-[1001] bg-black/70 flex items-end justify-center" onClick={() => setShowAdd(false)}>
+          <div className="w-full bg-slate-900 border-t border-slate-700 rounded-t-2xl p-5 pb-8" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-4">
+              <div className="text-white font-semibold">Schedule Appointment</div>
+              <button onClick={() => setShowAdd(false)} className="text-slate-500 hover:text-slate-300"><X size={18} /></button>
+            </div>
+            <div className="mb-3">
+              <label className="text-[11px] text-slate-500 uppercase tracking-wide block mb-1">Lead</label>
+              <select value={addForm.lead_id} onChange={e => setAddForm(f => ({ ...f, lead_id: e.target.value }))}
+                className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
+                <option value="">Select a lead…</option>
+                {myLeads.map(l => <option key={l.id} value={l.id}>{l.address}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="text-[11px] text-slate-500 uppercase tracking-wide block mb-1">Date</label>
+                <input type="date" value={addForm.date} onChange={e => setAddForm(f => ({ ...f, date: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
+              </div>
+              <div>
+                <label className="text-[11px] text-slate-500 uppercase tracking-wide block mb-1">Time</label>
+                <input type="time" value={addForm.time} onChange={e => setAddForm(f => ({ ...f, time: e.target.value }))}
+                  className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
+              </div>
+            </div>
+            <div className="mb-4">
+              <label className="text-[11px] text-slate-500 uppercase tracking-wide block mb-1">Notes (optional)</label>
+              <input type="text" value={addForm.notes} onChange={e => setAddForm(f => ({ ...f, notes: e.target.value }))}
+                placeholder="Inspection, quote, follow-up…"
+                className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500" />
+            </div>
+            <button onClick={handleAdd} disabled={addBusy || !addForm.lead_id}
+              className="w-full bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl">
+              {addBusy ? 'Saving…' : 'Save Appointment'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -1011,6 +1306,11 @@ export default function RepWorkspace() {
   const [mineLoaded, setMineLoaded] = useState(false)
   const [mineError, setMineError] = useState('')
   const [leadsSub, setLeadsSub] = useState('all')
+  const [appointments, setAppointments] = useState([])
+
+  useEffect(() => {
+    if (rep) getAppointmentsForRep(rep.id).then(r => setAppointments(r.appointments || [])).catch(() => {})
+  }, [rep?.id])
 
   const loadMine = useCallback(async () => {
     if (!rep) return
@@ -1097,10 +1397,17 @@ export default function RepWorkspace() {
             error={mineError}
             onReload={loadMine}
             onGoLeads={s => { setLeadsSub(s); setTab('leads') }}
+            appointments={appointments}
           />
         )}
         {tab === 'docs' && <Placeholder title="Documents" lines="Upload and access your documents here (coming soon)." />}
-        {tab === 'calendar' && <Placeholder title="Calendar" lines="Reminders and follow-up due dates will show here (coming soon)." />}
+        {tab === 'calendar' && (
+          <RepCalendar
+            rep={rep}
+            myLeads={myLeads}
+            active={tab === 'calendar'}
+          />
+        )}
       </div>
     </div>
   )
