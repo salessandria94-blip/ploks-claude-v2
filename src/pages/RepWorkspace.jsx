@@ -1344,7 +1344,12 @@ export default function RepWorkspace() {
   const [rep, setRep] = useState(() => {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || 'null') } catch { return null }
   })
-  const [tab, setTab] = useState('map')
+  const [tab, setTab] = useState(() => {
+    try { return localStorage.getItem('ploks_tab') || 'map' } catch { return 'map' }
+  })
+  useEffect(() => {
+    try { localStorage.setItem('ploks_tab', tab) } catch {}
+  }, [tab])
 
   // Shared "my leads" load — used by BOTH the Leads tab and Home dashboard so
   // the slow getLeadsForRep scan only runs once per session.
