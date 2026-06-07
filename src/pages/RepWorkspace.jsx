@@ -29,7 +29,7 @@ const LAYERS = [
   { id: 'followup',  label: 'Follow-up',     color: '#f97316'     },
   { id: 'closed',    label: 'Closed',        color: '#6b7280'     },
 ]
-const STATUS_PIN_COLOR = { 'no contact': COLOR_OPEN, contacted: '#f59e0b', working: '#a855f7', closed: '#6b7280' }
+const STATUS_PIN_COLOR = { 'no contact': COLOR_MINE, contacted: '#f59e0b', working: '#a855f7', closed: '#6b7280' }
 
 function relationOf(lead, repId) {
   if (lead.assigned_rep_id && String(lead.assigned_rep_id) === String(repId)) return 'mine'
