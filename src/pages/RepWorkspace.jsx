@@ -1075,9 +1075,20 @@ function RepCalendar({ rep, myLeads, active }) {
   const [viewYear,  setViewYear]  = useState(() => new Date().getFullYear())
   const [viewMonth, setViewMonth] = useState(() => new Date().getMonth())
   const [selDay,    setSelDay]    = useState(today)
-  const [showAdd,   setShowAdd]   = useState(false)
-  const [addForm,   setAddForm]   = useState({ lead_id: '', date: today, time: '09:00', notes: '' })
-  const [addBusy,   setAddBusy]   = useState(false)
+  const [showAdd,      setShowAdd]      = useState(false)
+  const [addForm,      setAddForm]      = useState({ lead_id: '', date: today, time: '09:00', notes: '' })
+  const [addBusy,      setAddBusy]      = useState(false)
+  const [leadSearch,   setLeadSearch]   = useState('')
+  const [leadSelected, setLeadSelected] = useState(null)
+
+  // Only Contacted + Working leads are eligible for appointments
+  const schedLeads = myLeads.filter(l => {
+    const s = (l.status || '').toLowerCase()
+    return s === 'contacted' || s === 'working'
+  })
+  const leadResults = leadSearch.trim().length > 0
+    ? schedLeads.filter(l => l.address.toLowerCase().includes(leadSearch.toLowerCase())).slice(0, 8)
+    : []
 
   useEffect(() => { if (active) loadAppts() }, [active, rep.id])
 
@@ -1097,6 +1108,7 @@ function RepCalendar({ rep, myLeads, active }) {
       setSelDay(addForm.date)
       setShowAdd(false)
       setAddForm({ lead_id: '', date: today, time: '09:00', notes: '' })
+      setLeadSearch(''); setLeadSelected(null)
     } catch (e) { alert('Error: ' + e.message) } finally { setAddBusy(false) }
   }
 
@@ -1227,19 +1239,51 @@ function RepCalendar({ rep, myLeads, active }) {
 
       {/* Add appointment modal */}
       {showAdd && (
-        <div className="fixed inset-0 z-[1001] bg-black/70 flex items-end justify-center" onClick={() => setShowAdd(false)}>
+        <div className="fixed inset-0 z-[1001] bg-black/70 flex items-end justify-center" onClick={() => { setShowAdd(false); setLeadSearch(''); setLeadSelected(null) }}>
           <div className="w-full bg-slate-900 border-t border-slate-700 rounded-t-2xl p-5 pb-8" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <div className="text-white font-semibold">Schedule Appointment</div>
-              <button onClick={() => setShowAdd(false)} className="text-slate-500 hover:text-slate-300"><X size={18} /></button>
+              <button onClick={() => { setShowAdd(false); setLeadSearch(''); setLeadSelected(null) }} className="text-slate-500 hover:text-slate-300"><X size={18} /></button>
             </div>
-            <div className="mb-3">
+            <div className="mb-3 relative">
               <label className="text-[11px] text-slate-500 uppercase tracking-wide block mb-1">Lead</label>
-              <select value={addForm.lead_id} onChange={e => setAddForm(f => ({ ...f, lead_id: e.target.value }))}
-                className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500">
-                <option value="">Select a lead…</option>
-                {myLeads.map(l => <option key={l.id} value={l.id}>{l.address}</option>)}
-              </select>
+              {leadSelected ? (
+                <div className="flex items-center justify-between bg-blue-900/40 border border-blue-700 rounded-lg px-3 py-2">
+                  <div>
+                    <div className="text-slate-100 text-sm font-medium">{leadSelected.address}</div>
+                    <div className="text-slate-400 text-xs">{leadSelected.status} · ZIP {leadSelected.zip}</div>
+                  </div>
+                  <button onClick={() => { setLeadSelected(null); setLeadSearch(''); setAddForm(f => ({ ...f, lead_id: '' })) }}
+                    className="text-slate-500 hover:text-slate-300 ml-2"><X size={14} /></button>
+                </div>
+              ) : (
+                <>
+                  <input
+                    type="text"
+                    value={leadSearch}
+                    onChange={e => setLeadSearch(e.target.value)}
+                    placeholder="Type an address…"
+                    autoComplete="off"
+                    className="w-full bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 placeholder:text-slate-500"
+                  />
+                  {leadResults.length > 0 && (
+                    <div className="absolute left-0 right-0 bg-slate-800 border border-slate-700 rounded-lg mt-1 overflow-hidden shadow-xl z-10">
+                      {leadResults.map(l => (
+                        <button key={l.id} onClick={() => { setLeadSelected(l); setAddForm(f => ({ ...f, lead_id: l.id })); setLeadSearch('') }}
+                          className="w-full text-left px-3 py-2.5 hover:bg-slate-700 border-b border-slate-700/50 last:border-0">
+                          <div className="text-slate-100 text-sm">{l.address}</div>
+                          <div className="text-slate-500 text-xs">{l.status} · ZIP {l.zip}</div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {leadSearch.trim().length > 0 && leadResults.length === 0 && (
+                    <div className="absolute left-0 right-0 bg-slate-800 border border-slate-700 rounded-lg mt-1 px-3 py-2.5 text-slate-500 text-sm shadow-xl z-10">
+                      No contacted/working leads match
+                    </div>
+                  )}
+                </>
+              )}
             </div>
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
