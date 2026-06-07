@@ -7,15 +7,6 @@ import RepsPage from './pages/RepsPage.jsx'
 import ActivityPage from './pages/ActivityPage.jsx'
 import RepWorkspace from './pages/RepWorkspace.jsx'
 
-// If a rep session is stored (PWA launched from /), send them to their workspace.
-function RootRoute() {
-  try {
-    const rep = JSON.parse(localStorage.getItem('ploks_rep_v2') || 'null')
-    if (rep?.slug) return <Navigate to={`/field/${rep.slug}`} replace />
-  } catch {}
-  return <Dashboard />
-}
-
 export default function App() {
   return (
     <BrowserRouter>
@@ -26,7 +17,7 @@ export default function App() {
 
         {/* Admin routes — with sidebar/shell */}
         <Route element={<AdminLayout />}>
-          <Route path="/" element={<RootRoute />} />
+          <Route path="/" element={<Dashboard />} />
           <Route path="/leads" element={<LeadsPage />} />
           <Route path="/map" element={<MapPage />} />
           <Route path="/reps" element={<RepsPage />} />
