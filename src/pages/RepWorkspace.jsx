@@ -565,26 +565,24 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
         {/* Selected lead — floating bottom sheet over the map */}
         {panelOpen && (
           <div className="absolute bottom-0 left-0 right-0 z-[999] pointer-events-none">
-            <div className="mx-2 mb-2 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto bg-slate-900 border border-slate-700" style={{ maxHeight: '52vh' }}>
-              <div className="flex justify-center pt-2 pb-1 bg-slate-900">
+            <div className="mx-2 mb-2 rounded-2xl shadow-2xl overflow-hidden pointer-events-auto bg-slate-900 border border-slate-700 flex flex-col" style={{ maxHeight: '75vh' }}>
+              <div className="flex justify-center pt-2 pb-1 shrink-0">
                 <div className="w-10 h-1 rounded-full bg-slate-600" />
               </div>
-              <div className="overflow-auto" style={{ maxHeight: 'calc(52vh - 24px)' }}>
-                <RepLeadProfile
-                  lead={selectedLead}
-                  rel={relationOf(selectedLead, rep.id)}
-                  reps={reps}
-                  meId={rep.id}
-                  busy={busy === selectedLead.id}
-                  onClose={() => setSelectedLead(null)}
-                  onClaim={() => claimOne(selectedLead)}
-                  onRelease={() => releaseOne(selectedLead)}
-                  onStatus={s => setStatus(selectedLead, s)}
-                  onSave={fields => saveProfile(selectedLead, fields)}
-                  onTransfer={toRep => transfer(selectedLead, toRep)}
-                  onNavigate={() => openNavigate(selectedLead)}
-                />
-              </div>
+              <RepLeadProfile
+                lead={selectedLead}
+                rel={relationOf(selectedLead, rep.id)}
+                reps={reps}
+                meId={rep.id}
+                busy={busy === selectedLead.id}
+                onClose={() => setSelectedLead(null)}
+                onClaim={() => claimOne(selectedLead)}
+                onRelease={() => releaseOne(selectedLead)}
+                onStatus={s => setStatus(selectedLead, s)}
+                onSave={fields => saveProfile(selectedLead, fields)}
+                onTransfer={toRep => transfer(selectedLead, toRep)}
+                onNavigate={() => openNavigate(selectedLead)}
+              />
             </div>
           </div>
         )}
@@ -651,15 +649,11 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClos
   const repName = id => (reps.find(r => r.id === id) || {}).name || id || 'System'
 
   return (
-    <div
-      className={variant === 'full'
-        ? 'h-full overflow-auto bg-slate-900'
-        : 'shrink-0 border-t border-slate-700 bg-slate-900 overflow-auto'}
-      style={variant === 'full' ? undefined : { maxHeight: '55vh' }}
-    >
-      <div className="p-4">
-        {/* Header */}
-        <div className="flex justify-between items-start mb-3">
+    <div className={variant === 'full' ? 'h-full flex flex-col bg-slate-900 overflow-hidden' : 'flex-1 flex flex-col bg-slate-900 min-h-0 overflow-hidden'}>
+
+      {/* Sticky header — always visible */}
+      <div className="shrink-0 px-4 pt-3 pb-2 border-b border-slate-800 bg-slate-900">
+        <div className="flex justify-between items-start">
           <div>
             <div className="text-white font-semibold text-base leading-tight">{lead.address}</div>
             <div className="text-slate-400 text-xs mt-0.5">
@@ -671,9 +665,12 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClos
               {rel === 'open' && <span className="text-blue-400">Open</span>}
             </div>
           </div>
-          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1"><X size={18} /></button>
+          <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1 shrink-0"><X size={18} /></button>
         </div>
+      </div>
 
+      {/* Scrollable body */}
+      <div className="flex-1 overflow-auto min-h-0 px-4 py-3">
         {/* Primary actions */}
         <div className="flex flex-wrap gap-2 mb-3">
           {rel === 'open' && (
@@ -724,8 +721,8 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClos
           <ProfileField label="Insurance" value={form.insurance} onChange={v => setForm(f => ({ ...f, insurance: v }))} placeholder="Carrier" disabled={!editable} />
         </div>
 
-        {/* Notes — current value, persists after save */}
-        <div className="flex flex-col gap-1 mb-3">
+        {/* Notes */}
+        <div className="flex flex-col gap-1">
           <label className="text-[11px] text-slate-500 uppercase tracking-wide">Notes</label>
           <textarea
             value={form.notes}
@@ -736,8 +733,10 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClos
             className="bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 resize-none placeholder:text-slate-600 disabled:opacity-60"
           />
         </div>
+      </div>
 
-        {/* Save + Log */}
+      {/* Sticky footer — Save + Log always visible */}
+      <div className="shrink-0 px-4 pt-2 pb-4 border-t border-slate-800 bg-slate-900">
         <div className="flex items-center gap-3">
           {editable && (
             <button onClick={handleSave} disabled={saving} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium">
@@ -749,7 +748,6 @@ function RepLeadProfile({ lead, rel, reps, meId, busy, variant = 'panel', onClos
           </button>
         </div>
       </div>
-
       {/* Log popup */}
       {logOpen && (
         <div className="fixed inset-0 z-[1000] bg-black/60 flex items-end sm:items-center justify-center p-4" onClick={() => setLogOpen(false)}>
