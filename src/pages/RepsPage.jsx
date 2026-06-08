@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getAllReps, createRep, updateRep, deactivateRep, getDashboardStats } from '../api/sheets.js'
-import { ExternalLink, Plus, Trash2, Eye, EyeOff, Phone, Mail, X } from 'lucide-react'
+import { ExternalLink, Plus, Trash2, Eye, EyeOff, Phone, Mail, X, Copy, Check } from 'lucide-react'
 
 const FIELD_BASE = `${window.location.origin}/field`
 
@@ -137,6 +137,31 @@ function AddRepCard({ onClick }) {
   )
 }
 
+// ── URL Copy Row ──────────────────────────────────────────────────────────────
+
+function UrlCopyRow({ url }) {
+  const [copied, setCopied] = useState(false)
+  function handleCopy() {
+    navigator.clipboard.writeText(url)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 bg-slate-800 rounded-lg px-3 py-2 text-slate-500 text-xs font-mono truncate">
+        {url}
+      </div>
+      <button
+        onClick={handleCopy}
+        className="shrink-0 p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition-colors"
+        title="Copy field link"
+      >
+        {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+      </button>
+    </div>
+  )
+}
+
 // ── Rep Form Modal (create + edit) ────────────────────────────────────────────
 
 function RepFormModal({ rep, onSave, onClose }) {
@@ -252,9 +277,7 @@ function RepFormModal({ rep, onSave, onClose }) {
         )}
 
         {isEdit && (
-          <div className="bg-slate-800 rounded-lg px-3 py-2 text-slate-500 text-xs font-mono truncate">
-            {FIELD_BASE}/{rep.slug}
-          </div>
+          <UrlCopyRow url={`${FIELD_BASE}/${rep.slug}`} />
         )}
 
         <div className="flex gap-3 pt-1">
