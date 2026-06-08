@@ -56,6 +56,23 @@ export async function getRepStats() {
   return getAllReps()
 }
 
+export async function updateRep(id, fields) {
+  const updates = {}
+  if (fields.name  !== undefined) updates.name  = fields.name
+  if (fields.phone !== undefined) updates.phone = fields.phone
+  if (fields.email !== undefined) updates.email = fields.email
+  if (fields.pin   !== undefined) updates.pin   = fields.pin
+  const { error } = await supabase.from('reps').update(updates).eq('id', id)
+  if (error) throw new Error(error.message)
+  return { ok: true }
+}
+
+export async function deactivateRep(id) {
+  const { error } = await supabase.from('reps').update({ active: false }).eq('id', id)
+  if (error) throw new Error(error.message)
+  return { ok: true }
+}
+
 export async function createRep(name, phone, email, pin, slug) {
   // Auto-generate next REP-XXX id based on existing max
   const { data: existing } = await supabase
