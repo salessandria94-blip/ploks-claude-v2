@@ -57,9 +57,22 @@ export async function getRepStats() {
 }
 
 export async function createRep(name, phone, email, pin, slug) {
+  // Auto-generate next REP-XXX id based on existing max
+  const { data: existing } = await supabase
+    .from('reps')
+    .select('id')
+    .order('id', { ascending: false })
+    .limit(1)
+  let nextId = 'REP-001'
+  if (existing && existing.length > 0) {
+    const num = parseInt((existing[0].id || '').replace(/\D/g, ''), 10) || 0
+    nextId = `REP-${String(num + 1).padStart(3, '0')}`
+  }
+
   const { data, error } = await supabase
     .from('reps')
     .insert({
+      id:     nextId,
       name:   name.trim(),
       slug:   slug.trim(),
       pin:    pin.trim(),
