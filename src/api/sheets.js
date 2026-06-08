@@ -45,7 +45,7 @@ export async function validatePin(repSlug, pin) {
 export async function getAllReps() {
   const { data, error } = await supabase
     .from('reps')
-    .select('id, name, slug')
+    .select('id, name, slug, phone, email, pin')
     .eq('active', true)
     .order('name')
   if (error) throw new Error(error.message)
@@ -54,6 +54,23 @@ export async function getAllReps() {
 
 export async function getRepStats() {
   return getAllReps()
+}
+
+export async function createRep(name, phone, email, pin, slug) {
+  const { data, error } = await supabase
+    .from('reps')
+    .insert({
+      name:   name.trim(),
+      slug:   slug.trim(),
+      pin:    pin.trim(),
+      phone:  phone?.trim() || null,
+      email:  email?.trim() || null,
+      active: true,
+    })
+    .select('id, name, slug, phone, email, pin')
+    .single()
+  if (error) throw new Error(error.message)
+  return { ok: true, rep: data }
 }
 
 // ── Leads — reads ─────────────────────────────────────────────────────────────
