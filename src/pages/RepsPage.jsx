@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getAllReps, createRep, updateRep, deactivateRep, getDashboardStats, getLeadsForRepByStatus } from '../api/sheets.js'
+import { getAllReps, createRep, updateRep, deactivateRep, getDashboardStats, getLeadsForRepByStatus, getLeadById } from '../api/sheets.js'
 import { ExternalLink, Plus, Trash2, Eye, EyeOff, Phone, Mail, X, Copy, Check } from 'lucide-react'
 
 const FIELD_BASE = `${window.location.origin}/field`
@@ -128,6 +128,153 @@ function RepCard({ rep, onEdit, onDelete, onDrill }) {
   )
 }
 
+// ── Lead Detail Modal (read-only admin view) ──────────────────────────────────
+
+const STATUS_COLOR = {
+  'No Contact': 'bg-slate-700 text-slate-300',
+  'Contacted':  'bg-blue-900/50 text-blue-300',
+  'Working':    'bg-orange-900/50 text-orange-300',
+  'Closed':     'bg-green-900/50 text-green-300',
+  'Follow Up':  'bg-purple-900/50 text-purple-300',
+}
+
+const ACTION_LABEL = {
+  claim:         'Claimed',
+  bulk_claim:    'Bulk Claimed',
+  status_update: 'Status Updated',
+  edit:          'Info Edited',
+  note:          'Note Added',
+  admin_assign:  'Admin Assigned',
+  unassign:      'Unassigned',
+  bulk_unassign: 'Bulk Unassigned',
+}
+
+function LeadDetailModal({ leadId, onClose }) {
+  const [lead,     setLead]     = useState(null)
+  const [activity, setActivity] = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [error,    setError]    = useState('')
+
+  useEffect(() => {
+    getLeadById(leadId)
+      .then(res => { setLead(res.lead); setActivity(res.activity) })
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false))
+  }, [leadId])
+
+  function fmtTs(ts) {
+    if (!ts) return ''
+    return new Date(ts).toLocaleString('en-US', {
+      month: '2-digit', day: '2-digit', year: '2-digit',
+      hour: '2-digit', minute: '2-digit',
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/70 z-[60] flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg flex flex-col max-h-[85vh] shadow-2xl">
+
+        {/* Header */}
+        <div className="flex items-start justify-between p-5 border-b border-slate-800 shrink-0">
+          <div className="min-w-0 pr-3">
+            {loading
+              ? <div className="text-slate-400 text-sm">Loading…</div>
+              : lead
+              ? <>
+                  <div className="text-slate-100 font-bold text-base leading-snug">{lead.address}</div>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="text-slate-500 text-xs">ZIP {lead.zip}</span>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOR[lead.status] || 'bg-slate-700 text-slate-300'}`}>
+                      {lead.status || 'No Contact'}
+                    </span>
+                  </div>
+                </>
+              : <div className="text-slate-400 text-sm">Lead not found</div>
+            }
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 transition-colors shrink-0">
+            <X size={18} />
+          </button>
+        </div>
+
+        {error && <div className="p-5 text-red-400 text-sm">{error}</div>}
+
+        {!loading && lead && (
+          <div className="flex-1 overflow-y-auto">
+
+            {/* Contact info */}
+            <div className="p-5 grid grid-cols-2 gap-x-6 gap-y-3 border-b border-slate-800">
+              {[
+                { label: 'Owner',     value: lead.owner_name },
+                { label: 'Phone',     value: lead.phone },
+                { label: 'Email',     value: lead.email },
+                { label: 'Insurance', value: lead.insurance },
+              ].map(({ label, value }) => (
+                <div key={label}>
+                  <div className="text-slate-500 text-xs mb-0.5">{label}</div>
+                  <div className="text-slate-200 text-sm">{value || <span className="text-slate-600">—</span>}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Rep assigned */}
+            {lead.assigned_rep && (
+              <div className="px-5 py-3 border-b border-slate-800">
+                <div className="text-slate-500 text-xs mb-0.5">Assigned Rep</div>
+                <div className="text-slate-200 text-sm">{lead.assigned_rep}</div>
+              </div>
+            )}
+
+            {/* Notes */}
+            {lead.notes && (
+              <div className="px-5 py-3 border-b border-slate-800">
+                <div className="text-slate-500 text-xs mb-1">Notes</div>
+                <div className="text-slate-300 text-sm whitespace-pre-wrap leading-relaxed">{lead.notes}</div>
+              </div>
+            )}
+
+            {/* Activity log */}
+            <div className="px-5 pt-4 pb-2">
+              <div className="text-slate-500 text-xs font-medium uppercase tracking-wide mb-3">Activity</div>
+              {activity.length === 0 && (
+                <div className="text-slate-600 text-sm">No activity yet.</div>
+              )}
+              <div className="flex flex-col gap-3">
+                {activity.map(entry => (
+                  <div key={entry.id} className="flex gap-3">
+                    <div className="w-1.5 h-1.5 rounded-full bg-slate-600 mt-1.5 shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-slate-300 text-xs font-medium">
+                          {ACTION_LABEL[entry.action] || entry.action}
+                        </span>
+                        {entry.status && (
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full ${STATUS_COLOR[entry.status] || 'bg-slate-700 text-slate-400'}`}>
+                            {entry.status}
+                          </span>
+                        )}
+                        {entry.rep_id && (
+                          <span className="text-slate-600 text-xs">{entry.rep_id}</span>
+                        )}
+                      </div>
+                      {entry.notes && (
+                        <div className="text-slate-500 text-xs mt-0.5 leading-relaxed">{entry.notes}</div>
+                      )}
+                      <div className="text-slate-700 text-xs mt-0.5">{fmtTs(entry.ts)}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+          </div>
+        )}
+
+      </div>
+    </div>
+  )
+}
+
 // ── Rep Lead Drill-down Modal ─────────────────────────────────────────────────
 
 const STATUS_BADGE = {
@@ -139,9 +286,10 @@ const STATUS_BADGE = {
 }
 
 function RepLeadModal({ rep, statusLabel, dbStatus, onClose }) {
-  const [leads,   setLeads]   = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error,   setError]   = useState('')
+  const [leads,       setLeads]       = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [error,       setError]       = useState('')
+  const [viewingLead, setViewingLead] = useState(null) // lead id to drill into
 
   useEffect(() => {
     getLeadsForRepByStatus(rep.id, dbStatus)
@@ -156,61 +304,65 @@ function RepLeadModal({ rep, statusLabel, dbStatus, onClose }) {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg flex flex-col max-h-[80vh] shadow-2xl">
+    <>
+      <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg flex flex-col max-h-[80vh] shadow-2xl">
 
-        {/* Header */}
-        <div className="flex items-start justify-between p-5 border-b border-slate-800 shrink-0">
-          <div>
-            <div className="text-slate-100 font-bold text-base">{rep.name}</div>
-            <div className="text-slate-400 text-sm mt-0.5">
-              {statusLabel}
-              {!loading && <span className="text-slate-600"> · {leads.length} lead{leads.length !== 1 ? 's' : ''}</span>}
+          {/* Header */}
+          <div className="flex items-start justify-between p-5 border-b border-slate-800 shrink-0">
+            <div>
+              <div className="text-slate-100 font-bold text-base">{rep.name}</div>
+              <div className="text-slate-400 text-sm mt-0.5">
+                {statusLabel}
+                {!loading && <span className="text-slate-600"> · {leads.length} lead{leads.length !== 1 ? 's' : ''}</span>}
+              </div>
             </div>
+            <button onClick={onClose} className="text-slate-400 hover:text-slate-200 transition-colors mt-0.5">
+              <X size={18} />
+            </button>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 transition-colors mt-0.5">
-            <X size={18} />
-          </button>
-        </div>
 
-        {/* List */}
-        <div className="flex-1 overflow-y-auto">
-          {loading && (
-            <div className="p-5 text-slate-400 text-sm">Loading…</div>
-          )}
-          {error && (
-            <div className="p-5 text-red-400 text-sm">{error}</div>
-          )}
-          {!loading && !error && leads.length === 0 && (
-            <div className="p-5 text-slate-500 text-sm">No leads in this category.</div>
-          )}
-          {!loading && leads.map((lead, i) => (
-            <div
-              key={lead.id}
-              className={`px-5 py-3.5 flex items-start justify-between gap-3 ${i < leads.length - 1 ? 'border-b border-slate-800' : ''}`}
-            >
-              <div className="min-w-0">
-                <div className="text-slate-100 text-sm font-medium truncate">{lead.address}</div>
-                <div className="text-slate-500 text-xs mt-0.5 flex flex-wrap gap-x-2">
-                  <span>ZIP {lead.zip}</span>
-                  {lead.owner_name && <span>{lead.owner_name}</span>}
-                  {lead.phone && <span>{lead.phone}</span>}
+          {/* List */}
+          <div className="flex-1 overflow-y-auto">
+            {loading && <div className="p-5 text-slate-400 text-sm">Loading…</div>}
+            {error   && <div className="p-5 text-red-400 text-sm">{error}</div>}
+            {!loading && !error && leads.length === 0 && (
+              <div className="p-5 text-slate-500 text-sm">No leads in this category.</div>
+            )}
+            {!loading && leads.map((lead, i) => (
+              <button
+                key={lead.id}
+                onClick={() => setViewingLead(lead.id)}
+                className={`w-full text-left px-5 py-3.5 flex items-start justify-between gap-3 hover:bg-slate-800 transition-colors ${i < leads.length - 1 ? 'border-b border-slate-800' : ''}`}
+              >
+                <div className="min-w-0">
+                  <div className="text-slate-100 text-sm font-medium truncate">{lead.address}</div>
+                  <div className="text-slate-500 text-xs mt-0.5 flex flex-wrap gap-x-2">
+                    <span>ZIP {lead.zip}</span>
+                    {lead.owner_name && <span>{lead.owner_name}</span>}
+                    {lead.phone      && <span>{lead.phone}</span>}
+                  </div>
                 </div>
-              </div>
-              <div className="shrink-0 flex flex-col items-end gap-1.5">
-                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[lead.status] || 'bg-slate-700 text-slate-300'}`}>
-                  {lead.status || 'No Contact'}
-                </span>
-                <span className="text-slate-600 text-xs">
-                  {fmtDate(lead.status_changed_at || lead.claimed_at)}
-                </span>
-              </div>
-            </div>
-          ))}
-        </div>
+                <div className="shrink-0 flex flex-col items-end gap-1.5">
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[lead.status] || 'bg-slate-700 text-slate-300'}`}>
+                    {lead.status || 'No Contact'}
+                  </span>
+                  <span className="text-slate-600 text-xs">
+                    {fmtDate(lead.status_changed_at || lead.claimed_at)}
+                  </span>
+                </div>
+              </button>
+            ))}
+          </div>
 
+        </div>
       </div>
-    </div>
+
+      {/* Lead detail overlay — stacks on top */}
+      {viewingLead && (
+        <LeadDetailModal leadId={viewingLead} onClose={() => setViewingLead(null)} />
+      )}
+    </>
   )
 }
 

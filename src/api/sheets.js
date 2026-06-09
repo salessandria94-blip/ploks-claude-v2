@@ -130,6 +130,15 @@ export async function getLeadsForRep(repId) {
   return { leads: data, repId, count: data.length }
 }
 
+export async function getLeadById(leadId) {
+  const [{ data: lead, error: e1 }, { data: activity, error: e2 }] = await Promise.all([
+    supabase.from('leads').select('*').eq('id', leadId).single(),
+    supabase.from('activity_log').select('*').eq('lead_id', leadId).order('ts', { ascending: false }).limit(30),
+  ])
+  if (e1) throw new Error(e1.message)
+  return { lead: lead || null, activity: activity || [] }
+}
+
 export async function getLeadsForRepByStatus(repId, status) {
   let q = supabase
     .from('leads')
