@@ -130,6 +130,17 @@ export async function getLeadsForRep(repId) {
   return { leads: data, repId, count: data.length }
 }
 
+export async function getLeadsForRepByStatus(repId, status) {
+  let q = supabase
+    .from('leads')
+    .select('id, address, zip, status, owner_name, phone, claimed_at, status_changed_at')
+    .eq('assigned_rep_id', repId)
+  if (status) q = q.eq('status', status)
+  const { data, error } = await q.order('status_changed_at', { ascending: false, nullsFirst: false })
+  if (error) throw new Error(error.message)
+  return { leads: data || [] }
+}
+
 export async function getLeadsForZip(zip) {
   return getAllLeads(zip)
 }

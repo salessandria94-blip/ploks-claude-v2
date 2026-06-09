@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getAllReps, createRep, updateRep, deactivateRep, getDashboardStats } from '../api/sheets.js'
+import { getAllReps, createRep, updateRep, deactivateRep, getDashboardStats, getLeadsForRepByStatus } from '../api/sheets.js'
 import { ExternalLink, Plus, Trash2, Eye, EyeOff, Phone, Mail, X, Copy, Check } from 'lucide-react'
 
 const FIELD_BASE = `${window.location.origin}/field`
@@ -15,17 +15,17 @@ function genPin() {
 
 // ── Rep Card ──────────────────────────────────────────────────────────────────
 
-function RepCard({ rep, onEdit, onDelete }) {
+function RepCard({ rep, onEdit, onDelete, onDrill }) {
   const [pinVisible,  setPinVisible]  = useState(false)
   const [confirmDel,  setConfirmDel]  = useState(false)
   const [deleting,    setDeleting]    = useState(false)
   const fieldUrl = `${FIELD_BASE}/${rep.slug}`
 
   const stats = [
-    { label: 'Assigned',  value: rep.claimed   || 0, color: 'text-blue-400' },
-    { label: 'Contacted', value: rep.contacted  || 0, color: 'text-blue-400' },
-    { label: 'Working',   value: rep.working    || 0, color: 'text-orange-400' },
-    { label: 'Closed',    value: rep.closed     || 0, color: 'text-green-400' },
+    { label: 'Assigned',  value: rep.claimed   || 0, color: 'text-blue-400',   dbStatus: 'No Contact' },
+    { label: 'Contacted', value: rep.contacted  || 0, color: 'text-blue-400',   dbStatus: 'Contacted' },
+    { label: 'Working',   value: rep.working    || 0, color: 'text-orange-400', dbStatus: 'Working' },
+    { label: 'Closed',    value: rep.closed     || 0, color: 'text-green-400',  dbStatus: 'Closed' },
   ]
 
   async function handleDelete(e) {
@@ -66,13 +66,17 @@ function RepCard({ rep, onEdit, onDelete }) {
         </a>
       </div>
 
-      {/* Stats */}
+      {/* Stats — each is clickable */}
       <div className="grid grid-cols-4 gap-1 py-3 border-t border-b border-slate-800">
-        {stats.map(({ label, value, color }) => (
-          <div key={label} className="flex flex-col items-center gap-0.5">
+        {stats.map(({ label, value, color, dbStatus }) => (
+          <button
+            key={label}
+            onClick={e => { e.stopPropagation(); if (value > 0) onDrill(rep, label, dbStatus) }}
+            className={`flex flex-col items-center gap-0.5 rounded-lg py-1 transition-colors ${value > 0 ? 'hover:bg-slate-800 cursor-pointer' : 'cursor-default'}`}
+          >
             <span className={`text-xl font-bold tabular-nums ${color}`}>{value}</span>
             <span className="text-slate-600 text-xs">{label}</span>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -119,6 +123,92 @@ function RepCard({ rep, onEdit, onDelete }) {
             <Trash2 size={14} />
           </button>
         )}
+      </div>
+    </div>
+  )
+}
+
+// ── Rep Lead Drill-down Modal ─────────────────────────────────────────────────
+
+const STATUS_BADGE = {
+  'No Contact': 'bg-slate-700 text-slate-300',
+  'Contacted':  'bg-blue-900/50 text-blue-300',
+  'Working':    'bg-orange-900/50 text-orange-300',
+  'Closed':     'bg-green-900/50 text-green-300',
+  'Follow Up':  'bg-purple-900/50 text-purple-300',
+}
+
+function RepLeadModal({ rep, statusLabel, dbStatus, onClose }) {
+  const [leads,   setLeads]   = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error,   setError]   = useState('')
+
+  useEffect(() => {
+    getLeadsForRepByStatus(rep.id, dbStatus)
+      .then(res => setLeads(res.leads))
+      .catch(err => setError(err.message))
+      .finally(() => setLoading(false))
+  }, [rep.id, dbStatus])
+
+  function fmtDate(ts) {
+    if (!ts) return ''
+    return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg flex flex-col max-h-[80vh] shadow-2xl">
+
+        {/* Header */}
+        <div className="flex items-start justify-between p-5 border-b border-slate-800 shrink-0">
+          <div>
+            <div className="text-slate-100 font-bold text-base">{rep.name}</div>
+            <div className="text-slate-400 text-sm mt-0.5">
+              {statusLabel}
+              {!loading && <span className="text-slate-600"> · {leads.length} lead{leads.length !== 1 ? 's' : ''}</span>}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-200 transition-colors mt-0.5">
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* List */}
+        <div className="flex-1 overflow-y-auto">
+          {loading && (
+            <div className="p-5 text-slate-400 text-sm">Loading…</div>
+          )}
+          {error && (
+            <div className="p-5 text-red-400 text-sm">{error}</div>
+          )}
+          {!loading && !error && leads.length === 0 && (
+            <div className="p-5 text-slate-500 text-sm">No leads in this category.</div>
+          )}
+          {!loading && leads.map((lead, i) => (
+            <div
+              key={lead.id}
+              className={`px-5 py-3.5 flex items-start justify-between gap-3 ${i < leads.length - 1 ? 'border-b border-slate-800' : ''}`}
+            >
+              <div className="min-w-0">
+                <div className="text-slate-100 text-sm font-medium truncate">{lead.address}</div>
+                <div className="text-slate-500 text-xs mt-0.5 flex flex-wrap gap-x-2">
+                  <span>ZIP {lead.zip}</span>
+                  {lead.owner_name && <span>{lead.owner_name}</span>}
+                  {lead.phone && <span>{lead.phone}</span>}
+                </div>
+              </div>
+              <div className="shrink-0 flex flex-col items-end gap-1.5">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_BADGE[lead.status] || 'bg-slate-700 text-slate-300'}`}>
+                  {lead.status || 'No Contact'}
+                </span>
+                <span className="text-slate-600 text-xs">
+                  {fmtDate(lead.status_changed_at || lead.claimed_at)}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+
       </div>
     </div>
   )
@@ -310,6 +400,7 @@ export default function RepsPage() {
   const [loading, setLoading] = useState(true)
   const [error,   setError]   = useState('')
   const [editing, setEditing] = useState(null)   // null | 'new' | rep object
+  const [drilling, setDrilling] = useState(null) // null | { rep, statusLabel, dbStatus }
 
   async function load() {
     setLoading(true)
@@ -365,6 +456,14 @@ export default function RepsPage() {
       {editing && editing !== 'new' && (
         <RepFormModal rep={editing} onSave={handleUpdate} onClose={() => setEditing(null)} />
       )}
+      {drilling && (
+        <RepLeadModal
+          rep={drilling.rep}
+          statusLabel={drilling.statusLabel}
+          dbStatus={drilling.dbStatus}
+          onClose={() => setDrilling(null)}
+        />
+      )}
 
       {error   && <div className="text-red-400 text-sm mb-4">{error}</div>}
       {loading && <div className="text-slate-400 text-sm">Loading reps…</div>}
@@ -377,6 +476,7 @@ export default function RepsPage() {
               rep={rep}
               onEdit={setEditing}
               onDelete={handleDelete}
+              onDrill={(rep, statusLabel, dbStatus) => setDrilling({ rep, statusLabel, dbStatus })}
             />
           ))}
           <AddRepCard onClick={() => setEditing('new')} />
