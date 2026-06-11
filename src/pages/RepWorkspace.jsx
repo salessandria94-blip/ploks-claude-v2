@@ -10,7 +10,7 @@ import {
   validatePin, getAllReps, getZipList, getAllLeads, getLeadsForRep, claimLead, unassignLead,
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
   claimLeadsBulk, unassignLeadsBulk, getLeadsNearPin, getLeadsInBounds,
-  createAppointment, getAppointmentsForRep, deleteAppointment,
+  createAppointment, getAppointmentsForRep, deleteAppointment, pingRepLocation,
 } from '../api/sheets.js'
 import AdminDashboard from './Dashboard.jsx'
 import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
@@ -206,6 +206,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   const mapRef = useRef(null)
   const watchRef = useRef(null)
   const snappedRef = useRef(false)
+  const lastPingRef = useRef(0)   // timestamp of last successful location ping
 
   useEffect(() => { getZipList().then(r => setZips(r.zips || [])).catch(() => {}) }, [])
   useEffect(() => { getAllReps().then(r => setReps(r.reps || [])).catch(() => {}) }, [])
@@ -217,9 +218,20 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
     navigator.geolocation.getCurrentPosition(
       pos => {
         setRepPos([pos.coords.latitude, pos.coords.longitude])
+        // First fix — ping Supabase immediately so admin sees the dot right away
+        pingRepLocation(rep.id, pos.coords.latitude, pos.coords.longitude).catch(() => {})
+        lastPingRef.current = Date.now()
         if (watchRef.current == null) {
           watchRef.current = navigator.geolocation.watchPosition(
-            p => setRepPos([p.coords.latitude, p.coords.longitude]),
+            p => {
+              setRepPos([p.coords.latitude, p.coords.longitude])
+              // Re-ping every 60 seconds so the admin map stays current
+              const now = Date.now()
+              if (now - lastPingRef.current >= 60000) {
+                lastPingRef.current = now
+                pingRepLocation(rep.id, p.coords.latitude, p.coords.longitude).catch(() => {})
+              }
+            },
             () => {},
             { enableHighAccuracy: true, maximumAge: 5000 }
           )

@@ -1,7 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
-import { getZipList, getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity, getAdminLeadsForZip, getAdminZipStats } from '../api/sheets.js'
+import {
+  getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity,
+  getAllAssignedLeads, getRepLocations,
+} from '../api/sheets.js'
 import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
 
@@ -11,7 +14,7 @@ const SATELLITE_TILE = {
 }
 const JACKSONVILLE_CENTER = [30.3322, -81.6557]
 
-// Status-based pin colors (matches rep workspace)
+// ── Lead pin colors by status ─────────────────────────────────────────────────
 const STATUS_COLORS = {
   'no contact': '#22c55e',
   'contacted':  '#f59e0b',
@@ -20,7 +23,6 @@ const STATUS_COLORS = {
   'closed':     '#6b7280',
 }
 const SELECTED_COLOR = '#3b82f6'
-
 const STATUS_LEGEND = [
   ['No Contact', '#22c55e'],
   ['Contacted',  '#f59e0b'],
@@ -48,7 +50,23 @@ function leadIcon(color, selected) {
   })
 }
 
-// ── Geometry ─────────────────────────────────────────────────────────────────
+// Rep location dot — sky-blue circle with initials
+function repLocIcon(name) {
+  const initials = (name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      background:#0ea5e9;color:white;border:2.5px solid white;border-radius:50%;
+      width:30px;height:30px;display:flex;align-items:center;justify-content:center;
+      font-size:11px;font-weight:700;letter-spacing:0;
+      box-shadow:0 0 0 3px rgba(14,165,233,0.35),0 2px 8px rgba(0,0,0,0.7);
+    ">${initials}</div>`,
+    iconSize: [30, 30],
+    iconAnchor: [15, 15],
+  })
+}
+
+// ── Geometry ──────────────────────────────────────────────────────────────────
 
 function pointInPolygon(pt, poly) {
   const x = pt[0], y = pt[1]
@@ -80,6 +98,7 @@ const SEARCH_PIN_ICON = L.divIcon({
   iconAnchor: [14, 40],
 })
 
+// Fit map to leads when the loaded set first appears (not on filter changes)
 function FitBounds({ leads }) {
   const map = useMap()
   const lastCount = useRef(0)
@@ -126,11 +145,7 @@ function DrawTool({ tool, leads, onSelect }) {
     container.style.cursor = 'crosshair'
     container.style.touchAction = 'none'
 
-    let drawing = false
-    let layer = null
-    let points = []
-    let center = null
-
+    let drawing = false, layer = null, points = [], center = null
     const clearLayer = () => { if (layer) { map.removeLayer(layer); layer = null } }
     const toLatLng = e => {
       const rect = container.getBoundingClientRect()
@@ -384,7 +399,6 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
             <Trash2 size={14} /> Clear
           </button>
         </div>
-
         <div className="flex flex-wrap items-center gap-2 mb-3">
           <select
             value={repId}
@@ -403,7 +417,6 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
             {bulkBusy ? `Assigning ${bulkProgress[0]}/${bulkProgress[1]}…` : `Assign all to ${rep ? rep.name : 'rep'}`}
           </button>
         </div>
-
         <div className="flex flex-col gap-1 max-h-32 overflow-auto text-xs">
           {leads.map(l => (
             <div key={l.id} className="flex justify-between gap-3 text-slate-400">
@@ -417,11 +430,10 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
   )
 }
 
-// ── Rep Filter Menu ───────────────────────────────────────────────────────────
+// ── Rep filter menu ───────────────────────────────────────────────────────────
 
 function RepMenu({ reps, repFilter, onSelect, open, onToggle }) {
   const ref = useRef(null)
-  // Close on outside click
   useEffect(() => {
     if (!open) return
     function handler(e) { if (ref.current && !ref.current.contains(e.target)) onToggle() }
@@ -475,81 +487,79 @@ function RepMenu({ reps, repFilter, onSelect, open, onToggle }) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function MapPage() {
-  const [zips, setZips]           = useState([])
-  const [zipCounts, setZipCounts] = useState({})   // zip → assigned lead count
-  const [reps, setReps]           = useState([])
-  const [loadingMeta, setLoadingMeta]   = useState(true)
-  const [selectedZip, setSelectedZip]   = useState('')
-  const [leads, setLeads]               = useState([])
-  const [loadingLeads, setLoadingLeads] = useState(false)
-  const [repFilter, setRepFilter]       = useState(null)   // null = All Reps
-  const [menuOpen, setMenuOpen]         = useState(false)
+  const [reps, setReps]             = useState([])
+  const [allLeads, setAllLeads]     = useState([])   // all assigned leads, lat/lng filtered
+  const [repFilter, setRepFilter]   = useState(null) // null = All Reps
+  const [zipFilter, setZipFilter]   = useState('')   // '' = all ZIPs
+  const [loading, setLoading]       = useState(true)
+  const [repLocations, setRepLocations] = useState([]) // live rep GPS dots
+  const [menuOpen, setMenuOpen]     = useState(false)
   const [selectedLead, setSelectedLead]   = useState(null)
   const [selectedLeads, setSelectedLeads] = useState([])
-  const [tool, setTool]           = useState(null)
-  const [busy, setBusy]           = useState(null)
-  const [bulkBusy, setBulkBusy]   = useState(false)
+  const [tool, setTool]             = useState(null)
+  const [busy, setBusy]             = useState(null)
+  const [bulkBusy, setBulkBusy]     = useState(false)
   const [bulkProgress, setBulkProgress] = useState([0, 0])
-  const [error, setError]         = useState('')
-  const [flyTarget, setFlyTarget] = useState(null)
+  const [error, setError]           = useState('')
+  const [flyTarget, setFlyTarget]   = useState(null)
 
-  // Load ZIPs, reps, and assigned lead counts in parallel
+  // On mount: load reps + all assigned leads in parallel
   useEffect(() => {
-    async function loadMeta() {
+    async function init() {
       try {
-        const [zipRes, repRes, countRes] = await Promise.all([
-          getZipList(),
-          getAllReps(),
-          getAdminZipStats(),
-        ])
-        setZips(zipRes.zips || [])
+        const [repRes, leadRes] = await Promise.all([getAllReps(), getAllAssignedLeads()])
         setReps(repRes.reps || [])
-        setZipCounts(countRes.counts || {})
+        setAllLeads((leadRes.leads || []).filter(l => l.lat && l.lng))
       } catch (err) {
         setError('Failed to load map data: ' + err.message)
       } finally {
-        setLoadingMeta(false)
+        setLoading(false)
       }
     }
-    loadMeta()
+    init()
   }, [])
 
-  // Load assigned leads for a ZIP
-  async function selectZip(zip) {
-    if (!zip) {
-      setSelectedZip('')
-      setLeads([])
-      setSelectedLead(null)
-      setSelectedLeads([])
-      return
+  // Poll rep GPS locations every 60 seconds (dots auto-hide after 5 min stale)
+  useEffect(() => {
+    async function poll() {
+      try { const r = await getRepLocations(); setRepLocations(r.locations || []) }
+      catch { /* silent */ }
     }
-    setSelectedZip(zip)
-    setLoadingLeads(true)
-    setSelectedLead(null)
-    setSelectedLeads([])
-    setError('')
-    try {
-      const res = await getAdminLeadsForZip(zip)
-      setLeads((res.leads || []).filter(l => l.lat && l.lng))
-    } catch (err) {
-      setError(`ZIP ${zip}: ${err.message}`)
-      setLeads([])
-    } finally {
-      setLoadingLeads(false)
-    }
-  }
+    poll()
+    const id = setInterval(poll, 60000)
+    return () => clearInterval(id)
+  }, [])
 
-  // Apply rep filter
+  // ZIP options: derived from currently rep-filtered leads (count = leads in that ZIP)
+  const zipOptions = useMemo(() => {
+    const source = repFilter
+      ? allLeads.filter(l => String(l.assigned_rep_id) === String(repFilter.id))
+      : allLeads
+    const counts = {}
+    source.forEach(l => { counts[l.zip] = (counts[l.zip] || 0) + 1 })
+    return Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0]))
+  }, [allLeads, repFilter])
+
+  // Displayed leads = rep filter + zip filter, both client-side
   const filteredLeads = useMemo(() => {
-    if (!repFilter) return leads
-    return leads.filter(l => String(l.assigned_rep_id) === String(repFilter.id))
-  }, [leads, repFilter])
+    let out = allLeads
+    if (repFilter) out = out.filter(l => String(l.assigned_rep_id) === String(repFilter.id))
+    if (zipFilter) out = out.filter(l => l.zip === zipFilter)
+    return out
+  }, [allLeads, repFilter, zipFilter])
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
 
+  function handleRepSelect(rep) {
+    setRepFilter(rep)
+    setZipFilter('')            // ZIP options change when rep changes — reset
+    setSelectedLead(null)
+    setSelectedLeads([])
+  }
+
   function patchLead(leadId, patch) {
-    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...patch } : l))
-    setSelectedLead(prev => prev && prev.id === leadId ? { ...prev, ...patch } : prev)
+    setAllLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...patch } : l))
+    setSelectedLead(prev => prev?.id === leadId ? { ...prev, ...patch } : prev)
     setSelectedLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...patch } : l))
   }
 
@@ -574,11 +584,8 @@ export default function MapPage() {
     try {
       await assignLead(lead.id, rep.id, rep.name, lead.zip)
       patchLead(lead.id, { assigned_rep: rep.name, assigned_rep_id: rep.id })
-    } catch (err) {
-      alert('Assign failed: ' + err.message)
-    } finally {
-      setBusy(null)
-    }
+    } catch (err) { alert('Assign failed: ' + err.message) }
+    finally { setBusy(null) }
   }
 
   async function handleUnassign(lead) {
@@ -586,11 +593,8 @@ export default function MapPage() {
     try {
       await unassignLead(lead.id, lead.zip)
       patchLead(lead.id, { assigned_rep: '', assigned_rep_id: '' })
-    } catch (err) {
-      alert('Unassign failed: ' + err.message)
-    } finally {
-      setBusy(null)
-    }
+    } catch (err) { alert('Unassign failed: ' + err.message) }
+    finally { setBusy(null) }
   }
 
   async function handleBulkAssign(targets, rep) {
@@ -622,20 +626,20 @@ export default function MapPage() {
       <div className="px-4 py-3 border-b border-slate-800 bg-slate-900 shrink-0 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-bold text-slate-100 shrink-0">Map</h1>
 
-        {/* ZIP dropdown */}
+        {/* ZIP dropdown — contextual to current rep filter */}
         <div className="relative min-w-40">
           <select
-            value={selectedZip}
-            onChange={e => selectZip(e.target.value)}
-            disabled={loadingMeta}
+            value={zipFilter}
+            onChange={e => { setZipFilter(e.target.value); setSelectedLead(null); setSelectedLeads([]) }}
+            disabled={loading || zipOptions.length === 0}
             className="w-full appearance-none bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:border-blue-500 disabled:opacity-50"
           >
             <option value="">
-              {loadingMeta ? 'Loading ZIPs…' : 'Select a ZIP…'}
+              {loading ? 'Loading…' : zipOptions.length === 0 ? 'No ZIPs' : 'All ZIPs'}
             </option>
-            {zips.map(zip => (
+            {zipOptions.map(([zip, count]) => (
               <option key={zip} value={zip}>
-                {zip}{zipCounts[zip] ? ` (${zipCounts[zip]})` : ''}
+                {zip} ({count})
               </option>
             ))}
           </select>
@@ -644,12 +648,13 @@ export default function MapPage() {
 
         <AddressSearch onResult={setFlyTarget} compact />
 
-        {loadingLeads && <Loader2 size={16} className="animate-spin text-blue-400 shrink-0" />}
+        {loading && <Loader2 size={16} className="animate-spin text-blue-400 shrink-0" />}
 
-        {filteredLeads.length > 0 && (
+        {!loading && (
           <span className="text-slate-500 text-xs shrink-0">
             {filteredLeads.length} leads
-            {repFilter ? <span className="text-blue-400"> · {repFilter.name}</span> : ''}
+            {repFilter && <span className="text-blue-400"> · {repFilter.name}</span>}
+            {zipFilter  && <span className="text-slate-600"> · ZIP {zipFilter}</span>}
           </span>
         )}
       </div>
@@ -658,7 +663,7 @@ export default function MapPage() {
         <div className="text-red-400 text-sm px-4 py-2 bg-red-950/30 shrink-0">{error}</div>
       )}
 
-      {/* ── Map area ─────────────────────────────────────────────────────────── */}
+      {/* ── Map ──────────────────────────────────────────────────────────────── */}
       <div className="relative flex-1 min-h-0">
         <MapContainer
           center={JACKSONVILLE_CENTER}
@@ -669,12 +674,12 @@ export default function MapPage() {
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
           <FlyToLocation coords={flyTarget} />
           {flyTarget && <Marker position={flyTarget} icon={SEARCH_PIN_ICON} />}
-          <FitBounds leads={leads} />
+          <FitBounds leads={allLeads} />
           <CenterAndResize focusLead={selectedLead} panelOpen={panelOpen} />
           <ClickToClear enabled={!tool} onClear={clearSelection} />
           <DrawTool tool={tool} leads={filteredLeads} onSelect={handleAreaSelect} />
 
-          {/* Pins — colored by status */}
+          {/* Lead pins — colored by status */}
           {filteredLeads.map(lead => {
             const isSel = selectedIds.has(lead.id) || (selectedLead?.id === lead.id)
             return (
@@ -686,13 +691,26 @@ export default function MapPage() {
               />
             )
           })}
+
+          {/* Rep location dots — sky-blue, show only if GPS is active & fresh */}
+          {repLocations.map(loc => {
+            const r = reps.find(r => r.id === loc.rep_id)
+            return r ? (
+              <Marker
+                key={loc.rep_id}
+                position={[loc.lat, loc.lng]}
+                icon={repLocIcon(r.name)}
+                zIndexOffset={2000}
+              />
+            ) : null
+          })}
         </MapContainer>
 
         {/* Rep filter menu (top-left) */}
         <RepMenu
           reps={reps}
           repFilter={repFilter}
-          onSelect={setRepFilter}
+          onSelect={handleRepSelect}
           open={menuOpen}
           onToggle={() => setMenuOpen(o => !o)}
         />
@@ -738,15 +756,23 @@ export default function MapPage() {
               {label}
             </div>
           ))}
+          {repLocations.length > 0 && (
+            <>
+              <div className="border-t border-slate-700/50 my-0.5" />
+              <div className="flex items-center gap-2">
+                <span className="w-3 h-3 rounded-full inline-block shrink-0" style={{ background: '#0ea5e9' }} />
+                Rep (live)
+              </div>
+            </>
+          )}
         </div>
 
-        {/* Empty state */}
-        {!selectedZip && !loadingLeads && (
+        {/* Empty / loading state */}
+        {loading && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="bg-slate-900/80 rounded-xl px-5 py-4 text-center">
-              <MapPin size={28} className="text-slate-600 mb-2 mx-auto" />
-              <div className="text-slate-300 text-sm font-medium">Select a ZIP to view assigned leads</div>
-              <div className="text-slate-500 text-xs mt-1">Number in dropdown = leads assigned to any rep</div>
+            <div className="bg-slate-900/80 rounded-xl px-5 py-4 flex items-center gap-3">
+              <Loader2 size={20} className="animate-spin text-blue-400" />
+              <div className="text-slate-300 text-sm">Loading all assigned leads…</div>
             </div>
           </div>
         )}

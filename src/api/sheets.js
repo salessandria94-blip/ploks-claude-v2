@@ -175,6 +175,31 @@ export async function getAdminZipStats() {
   return { counts }
 }
 
+export async function getAllAssignedLeads() {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .not('assigned_rep_id', 'is', null)
+  if (error) throw new Error(error.message)
+  return { leads: data || [] }
+}
+
+export async function pingRepLocation(repId, lat, lng) {
+  const { error } = await supabase
+    .from('rep_locations')
+    .upsert({ rep_id: repId, lat, lng, updated_at: new Date().toISOString() }, { onConflict: 'rep_id' })
+  if (error) throw new Error(error.message)
+}
+
+export async function getRepLocations() {
+  const { data, error } = await supabase
+    .from('rep_locations')
+    .select('rep_id, lat, lng, updated_at')
+  if (error) throw new Error(error.message)
+  const cutoff = Date.now() - 5 * 60 * 1000          // hide dots older than 5 min
+  return { locations: (data || []).filter(l => new Date(l.updated_at).getTime() > cutoff) }
+}
+
 export async function getLeadsInBounds(latMin, latMax, lngMin, lngMax) {
   const { data, error } = await supabase
     .from('leads')
