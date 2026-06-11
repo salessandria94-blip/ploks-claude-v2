@@ -5,7 +5,7 @@ import {
   getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity,
   getAllAssignedLeads, getRepLocations,
 } from '../api/sheets.js'
-import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu } from 'lucide-react'
+import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
 
 const SATELLITE_TILE = {
@@ -85,6 +85,19 @@ function pointInPolygon(pt, poly) {
 function FlyToLocation({ coords }) {
   const map = useMap()
   useEffect(() => { if (coords) map.flyTo(coords, 17) }, [coords, map])
+  return null
+}
+
+// Fly to a rep's live GPS position (new object reference = new fly)
+function FlyToRepLocation({ target }) {
+  const map = useMap()
+  const prev = useRef(null)
+  useEffect(() => {
+    if (target && target !== prev.current) {
+      prev.current = target
+      map.flyTo([target.lat, target.lng], 14, { animate: true, duration: 1.5 })
+    }
+  }, [target, map])
   return null
 }
 
@@ -432,8 +445,10 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
 
 // ── Rep filter menu ───────────────────────────────────────────────────────────
 
-function RepMenu({ reps, repFilter, onSelect, open, onToggle }) {
+function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations }) {
   const ref = useRef(null)
+  const activeRepIds = new Set((repLocations || []).map(l => l.rep_id))
+
   useEffect(() => {
     if (!open) return
     function handler(e) { if (ref.current && !ref.current.contains(e.target)) onToggle() }
@@ -454,10 +469,14 @@ function RepMenu({ reps, repFilter, onSelect, open, onToggle }) {
       >
         <Menu size={15} />
         {repFilter ? repFilter.name : 'All Reps'}
+        {/* Show live indicator on button when filtered rep is online */}
+        {repFilter && activeRepIds.has(repFilter.id) && (
+          <Navigation size={12} className="text-green-400 fill-green-400" />
+        )}
       </button>
 
       {open && (
-        <div className="absolute top-11 left-0 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 min-w-52 max-h-80 overflow-y-auto">
+        <div className="absolute top-11 left-0 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 min-w-56 max-h-80 overflow-y-auto">
           <button
             onClick={() => { onSelect(null); onToggle() }}
             className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5 ${
@@ -467,17 +486,29 @@ function RepMenu({ reps, repFilter, onSelect, open, onToggle }) {
             All Reps
           </button>
           <div className="border-t border-slate-700/50 my-1" />
-          {reps.map(rep => (
-            <button
-              key={rep.id}
-              onClick={() => { onSelect(rep); onToggle() }}
-              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
-                repFilter?.id === rep.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-              }`}
-            >
-              {rep.name}
-            </button>
-          ))}
+          {reps.map(rep => {
+            const isLive = activeRepIds.has(rep.id)
+            return (
+              <button
+                key={rep.id}
+                onClick={() => { onSelect(rep); onToggle() }}
+                className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  repFilter?.id === rep.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <span>{rep.name}</span>
+                {isLive && (
+                  <span className="flex items-center gap-1 shrink-0">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
+                    </span>
+                    <Navigation size={11} className={repFilter?.id === rep.id ? 'text-white fill-white' : 'text-green-400 fill-green-400'} />
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       )}
     </div>
@@ -493,6 +524,7 @@ export default function MapPage() {
   const [zipFilter, setZipFilter]   = useState('')   // '' = all ZIPs
   const [loading, setLoading]       = useState(true)
   const [repLocations, setRepLocations] = useState([]) // live rep GPS dots
+  const [repFlyTarget, setRepFlyTarget] = useState(null) // snap map to live rep
   const [menuOpen, setMenuOpen]     = useState(false)
   const [selectedLead, setSelectedLead]   = useState(null)
   const [selectedLeads, setSelectedLeads] = useState([])
@@ -555,6 +587,11 @@ export default function MapPage() {
     setZipFilter('')            // ZIP options change when rep changes — reset
     setSelectedLead(null)
     setSelectedLeads([])
+    // If this rep has an active GPS location, snap the map to them
+    if (rep) {
+      const loc = repLocations.find(l => l.rep_id === rep.id)
+      if (loc) setRepFlyTarget({ lat: loc.lat, lng: loc.lng }) // new object = triggers fly
+    }
   }
 
   function patchLead(leadId, patch) {
@@ -673,6 +710,7 @@ export default function MapPage() {
         >
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
           <FlyToLocation coords={flyTarget} />
+          <FlyToRepLocation target={repFlyTarget} />
           {flyTarget && <Marker position={flyTarget} icon={SEARCH_PIN_ICON} />}
           <FitBounds leads={allLeads} />
           <CenterAndResize focusLead={selectedLead} panelOpen={panelOpen} />
@@ -713,6 +751,7 @@ export default function MapPage() {
           onSelect={handleRepSelect}
           open={menuOpen}
           onToggle={() => setMenuOpen(o => !o)}
+          repLocations={repLocations}
         />
 
         {/* Lasso / radius tools (top-right) */}
