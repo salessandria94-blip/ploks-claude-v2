@@ -11,9 +11,9 @@ import {
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
   claimLeadsBulk, unassignLeadsBulk, getLeadsNearPin, getLeadsInBounds,
   createAppointment, getAppointmentsForRep, deleteAppointment,
-  getDashboardStats, getRecentActivity, getAppointmentsForAdmin,
 } from '../api/sheets.js'
-import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2, BarChart2, ChevronDown, ChevronUp } from 'lucide-react'
+import AdminDashboard from './Dashboard.jsx'
+import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
@@ -1538,14 +1538,13 @@ function Placeholder({ title, lines }) {
 
 // ── Shell ────────────────────────────────────────────────────────────────────
 
-const BASE_TABS = [
+const TABS = [
   { id: 'dashboard', label: 'Home',     icon: LayoutDashboard },
   { id: 'map',       label: 'Map',      icon: MapIcon         },
   { id: 'leads',     label: 'Leads',    icon: List            },
   { id: 'docs',      label: 'Docs',     icon: FileText        },
   { id: 'calendar',  label: 'Calendar', icon: Calendar        },
 ]
-const MANAGER_TAB = { id: 'overview', label: 'Overview', icon: BarChart2 }
 
 export default function RepWorkspace() {
   const { repSlug } = useParams()
@@ -1603,8 +1602,6 @@ export default function RepWorkspace() {
 
   if (!rep) return <RepLogin lockedSlug={repSlug || ''} onUnlock={unlock} />
 
-  const tabs = rep.is_manager ? [...BASE_TABS, MANAGER_TAB] : BASE_TABS
-
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col">
       {/* Top bar */}
@@ -1620,7 +1617,7 @@ export default function RepWorkspace() {
 
       {/* Tab nav */}
       <div className="flex shrink-0 bg-slate-900 border-b border-slate-800 overflow-x-auto">
-        {tabs.map(({ id, label, icon: Icon }) => (
+        {TABS.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
@@ -1652,19 +1649,19 @@ export default function RepWorkspace() {
             onRemove={removeMyLead}
           />
         </div>
-        {tab === 'dashboard' && (
-          <RepHome
-            rep={rep}
-            leads={myLeads}
-            loading={loadingMine}
-            error={mineError}
-            onReload={loadMine}
-            onGoLeads={s => { setLeadsSub(s); setTab('leads') }}
-            appointments={appointments}
-          />
+        {tab === 'dashboard' && (rep.is_manager
+          ? <div className="h-full overflow-y-auto"><AdminDashboard /></div>
+          : <RepHome
+              rep={rep}
+              leads={myLeads}
+              loading={loadingMine}
+              error={mineError}
+              onReload={loadMine}
+              onGoLeads={s => { setLeadsSub(s); setTab('leads') }}
+              appointments={appointments}
+            />
         )}
         {tab === 'docs' && <Placeholder title="Documents" lines="Upload and access your documents here (coming soon)." />}
-        {tab === 'overview' && rep.is_manager && <RepManagerOverview />}
         {tab === 'calendar' && (
           <RepCalendar
             rep={rep}
