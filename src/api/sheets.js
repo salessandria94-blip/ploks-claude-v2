@@ -154,6 +154,27 @@ export async function getLeadsForZip(zip) {
   return getAllLeads(zip)
 }
 
+export async function getAdminLeadsForZip(zip) {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('*')
+    .eq('zip', zip)
+    .not('assigned_rep_id', 'is', null)
+  if (error) throw new Error(error.message)
+  return { leads: data || [] }
+}
+
+export async function getAdminZipStats() {
+  const { data, error } = await supabase
+    .from('leads')
+    .select('zip')
+    .not('assigned_rep_id', 'is', null)
+  if (error) throw new Error(error.message)
+  const counts = {}
+  ;(data || []).forEach(r => { counts[r.zip] = (counts[r.zip] || 0) + 1 })
+  return { counts }
+}
+
 export async function getLeadsInBounds(latMin, latMax, lngMin, lngMax) {
   const { data, error } = await supabase
     .from('leads')

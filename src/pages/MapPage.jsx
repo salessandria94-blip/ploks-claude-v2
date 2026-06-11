@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
-import { getZipList, getAllReps, getAllLeads, assignLead, unassignLead, updateLeadProfile, getLeadActivity } from '../api/sheets.js'
-import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList } from 'lucide-react'
+import { getZipList, getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity, getAdminLeadsForZip, getAdminZipStats } from '../api/sheets.js'
+import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
 
 const SATELLITE_TILE = {
@@ -11,13 +11,35 @@ const SATELLITE_TILE = {
 }
 const JACKSONVILLE_CENTER = [30.3322, -81.6557]
 
-const BLUE = '#3b82f6'   // unassigned / open
-const ORANGE = '#f97316' // assigned
-const GREEN = '#22c55e'  // selected
+// Status-based pin colors (matches rep workspace)
+const STATUS_COLORS = {
+  'no contact': '#22c55e',
+  'contacted':  '#f59e0b',
+  'working':    '#a855f7',
+  'follow up':  '#f97316',
+  'closed':     '#6b7280',
+}
+const SELECTED_COLOR = '#3b82f6'
+
+const STATUS_LEGEND = [
+  ['No Contact', '#22c55e'],
+  ['Contacted',  '#f59e0b'],
+  ['Working',    '#a855f7'],
+  ['Follow Up',  '#f97316'],
+  ['Closed',     '#6b7280'],
+]
+
+function pinColor(lead, selected) {
+  if (selected) return SELECTED_COLOR
+  const key = (lead.status || 'no contact').toLowerCase()
+  return STATUS_COLORS[key] || STATUS_COLORS['no contact']
+}
 
 function leadIcon(color, selected) {
   const size = selected ? 18 : 14
-  const ring = selected ? `box-shadow:0 0 0 3px rgba(34,197,94,0.5);` : 'box-shadow:0 1px 4px rgba(0,0,0,0.5);'
+  const ring = selected
+    ? `box-shadow:0 0 0 3px rgba(59,130,246,0.5);`
+    : 'box-shadow:0 1px 4px rgba(0,0,0,0.5);'
   return L.divIcon({
     className: '',
     html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid white;${ring}"></div>`,
@@ -26,7 +48,7 @@ function leadIcon(color, selected) {
   })
 }
 
-// ── Geometry ────────────────────────────────────────────────────────────────
+// ── Geometry ─────────────────────────────────────────────────────────────────
 
 function pointInPolygon(pt, poly) {
   const x = pt[0], y = pt[1]
@@ -40,18 +62,14 @@ function pointInPolygon(pt, poly) {
   return inside
 }
 
-// ── Map helpers ──────────────────────────────────────────────────────────────
+// ── Map helpers ───────────────────────────────────────────────────────────────
 
-// Fly to geocoded address
 function FlyToLocation({ coords }) {
   const map = useMap()
-  useEffect(() => {
-    if (coords) map.flyTo(coords, 17)
-  }, [coords, map])
+  useEffect(() => { if (coords) map.flyTo(coords, 17) }, [coords, map])
   return null
 }
 
-// Red pin dropped at a searched address
 const SEARCH_PIN_ICON = L.divIcon({
   className: '',
   html: `<svg width="28" height="40" viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
@@ -62,7 +80,6 @@ const SEARCH_PIN_ICON = L.divIcon({
   iconAnchor: [14, 40],
 })
 
-// Fit map to all leads when the loaded set grows (not on selection changes)
 function FitBounds({ leads }) {
   const map = useMap()
   const lastCount = useRef(0)
@@ -78,7 +95,6 @@ function FitBounds({ leads }) {
   return null
 }
 
-// Center on a focused lead + keep map sized correctly as the bottom panel opens/closes
 function CenterAndResize({ focusLead, panelOpen }) {
   const map = useMap()
   useEffect(() => {
@@ -96,14 +112,11 @@ function CenterAndResize({ focusLead, panelOpen }) {
   return null
 }
 
-// Clear selection when clicking empty map (only when no draw tool active)
 function ClickToClear({ enabled, onClear }) {
   useMapEvents({ click: () => { if (enabled) onClear() } })
   return null
 }
 
-// Lasso / radius drawing. Uses pointer events so it works with mouse,
-// touch (phone/tablet), and stylus alike. Disables panning while active.
 function DrawTool({ tool, leads, onSelect }) {
   const map = useMap()
   useEffect(() => {
@@ -111,7 +124,7 @@ function DrawTool({ tool, leads, onSelect }) {
     const container = map.getContainer()
     map.dragging.disable()
     container.style.cursor = 'crosshair'
-    container.style.touchAction = 'none' // stop the browser from scrolling/zooming mid-draw
+    container.style.touchAction = 'none'
 
     let drawing = false
     let layer = null
@@ -125,7 +138,7 @@ function DrawTool({ tool, leads, onSelect }) {
     }
 
     function onDown(e) {
-      if (e.button != null && e.button !== 0) return // primary button / single touch only
+      if (e.button != null && e.button !== 0) return
       e.preventDefault()
       drawing = true
       try { container.setPointerCapture(e.pointerId) } catch { /* noop */ }
@@ -133,22 +146,18 @@ function DrawTool({ tool, leads, onSelect }) {
       const ll = toLatLng(e)
       if (tool === 'lasso') {
         points = [ll]
-        layer = L.polyline(points, { color: GREEN, weight: 2 }).addTo(map)
+        layer = L.polyline(points, { color: '#22c55e', weight: 2 }).addTo(map)
       } else {
         center = ll
-        layer = L.circle(center, { radius: 0, color: GREEN, weight: 2, fillColor: GREEN, fillOpacity: 0.12 }).addTo(map)
+        layer = L.circle(center, { radius: 0, color: '#22c55e', weight: 2, fillColor: '#22c55e', fillOpacity: 0.12 }).addTo(map)
       }
     }
     function onMove(e) {
       if (!drawing) return
       e.preventDefault()
       const ll = toLatLng(e)
-      if (tool === 'lasso') {
-        points.push(ll)
-        layer.setLatLngs(points)
-      } else {
-        layer.setRadius(center.distanceTo(ll))
-      }
+      if (tool === 'lasso') { points.push(ll); layer.setLatLngs(points) }
+      else { layer.setRadius(center.distanceTo(ll)) }
     }
     function onUp(e) {
       if (!drawing) return
@@ -158,7 +167,7 @@ function DrawTool({ tool, leads, onSelect }) {
         if (points.length < 3) { clearLayer(); return }
         const poly = points.map(p => [p.lat, p.lng])
         clearLayer()
-        layer = L.polygon(poly, { color: GREEN, weight: 2, fillColor: GREEN, fillOpacity: 0.12 }).addTo(map)
+        layer = L.polygon(poly, { color: '#22c55e', weight: 2, fillColor: '#22c55e', fillOpacity: 0.12 }).addTo(map)
         onSelect(leads.filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], poly)))
       } else {
         const r = layer ? layer.getRadius() : 0
@@ -185,7 +194,7 @@ function DrawTool({ tool, leads, onSelect }) {
   return null
 }
 
-// ── Assign dropdown (shared) ──────────────────────────────────────────────────
+// ── Assign dropdown ───────────────────────────────────────────────────────────
 
 function AssignDropdown({ lead, reps, busy, onAssign, onUnassign, dropUp }) {
   const [open, setOpen] = useState(false)
@@ -225,9 +234,9 @@ function AssignDropdown({ lead, reps, busy, onAssign, onUnassign, dropUp }) {
   )
 }
 
-// ── Bottom panels ──────────────────────────────────────────────────────────
+// ── Bottom panels ─────────────────────────────────────────────────────────────
 
-const LEAD_STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
+const LEAD_STATUSES = ['No Contact', 'Contacted', 'Working', 'Follow Up', 'Closed']
 
 function PanelInput({ label, value, onChange, placeholder }) {
   return (
@@ -250,9 +259,9 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
   })
   const [status, setStatus] = useState(lead.status || '')
   const [saving, setSaving] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [logOpen, setLogOpen] = useState(false)
-  const [activity, setActivity] = useState([])
+  const [saved, setSaved]   = useState(false)
+  const [logOpen, setLogOpen]       = useState(false)
+  const [activity, setActivity]     = useState([])
   const [loadingLog, setLoadingLog] = useState(false)
 
   useEffect(() => {
@@ -265,11 +274,11 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
   async function handleSave() {
     const fields = {}
     if (form.owner_name !== (lead.owner_name || '')) fields.owner_name = form.owner_name
-    if (form.phone      !== (lead.phone || ''))      fields.phone = form.phone
-    if (form.email      !== (lead.email || ''))      fields.email = form.email
-    if (form.insurance  !== (lead.insurance || ''))  fields.insurance = form.insurance
-    if (form.notes      !== (lead.notes || ''))      fields.notes = form.notes
-    if (status          !== (lead.status || ''))     fields.status = status
+    if (form.phone      !== (lead.phone || ''))      fields.phone      = form.phone
+    if (form.email      !== (lead.email || ''))      fields.email      = form.email
+    if (form.insurance  !== (lead.insurance || ''))  fields.insurance  = form.insurance
+    if (form.notes      !== (lead.notes || ''))      fields.notes      = form.notes
+    if (status          !== (lead.status || ''))     fields.status     = status
     if (!Object.keys(fields).length) return
     setSaving(true)
     try {
@@ -292,7 +301,6 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
   return (
     <div className="shrink-0 border-t border-slate-800 bg-slate-900 overflow-auto" style={{ maxHeight: '55vh' }}>
       <div className="p-4">
-        {/* Header */}
         <div className="flex items-start justify-between mb-3">
           <div>
             <div className="text-white font-semibold text-base">{lead.address}</div>
@@ -308,12 +316,10 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1"><X size={18} /></button>
         </div>
 
-        {/* Assign */}
         <div className="mb-3 max-w-xs">
           <AssignDropdown lead={lead} reps={reps} busy={busy} onAssign={onAssign} onUnassign={onUnassign} />
         </div>
 
-        {/* Status quick buttons */}
         <div className="flex flex-wrap gap-1.5 mb-3">
           {LEAD_STATUSES.map(s => (
             <button key={s} onClick={() => setStatus(s)}
@@ -323,7 +329,6 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
           ))}
         </div>
 
-        {/* Editable fields */}
         <div className="grid grid-cols-2 gap-3 mb-3">
           <PanelInput label="Owner"     value={form.owner_name} onChange={v => setForm(f => ({ ...f, owner_name: v }))} />
           <PanelInput label="Phone"     value={form.phone}      onChange={v => setForm(f => ({ ...f, phone: v }))}      placeholder="(000) 000-0000" />
@@ -331,7 +336,6 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
           <PanelInput label="Insurance" value={form.insurance}  onChange={v => setForm(f => ({ ...f, insurance: v }))}  placeholder="Carrier" />
         </div>
 
-        {/* Notes */}
         <div className="flex flex-col gap-1 mb-3">
           <label className="text-[11px] text-slate-500 uppercase tracking-wide">Notes</label>
           <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
@@ -339,7 +343,6 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
             className="bg-slate-950 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 resize-none placeholder:text-slate-600" />
         </div>
 
-        {/* Save + Log */}
         <div className="flex items-center gap-3">
           <button onClick={handleSave} disabled={saving}
             className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium">
@@ -350,7 +353,6 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
           </button>
         </div>
 
-        {/* Log */}
         {logOpen && (
           <div className="mt-3 bg-slate-950 border border-slate-800 rounded-xl p-3">
             <div className="text-xs text-slate-500 uppercase tracking-wide mb-2">Activity — {lead.address}</div>
@@ -415,34 +417,96 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
   )
 }
 
-// ── Main ────────────────────────────────────────────────────────────────────
+// ── Rep Filter Menu ───────────────────────────────────────────────────────────
+
+function RepMenu({ reps, repFilter, onSelect, open, onToggle }) {
+  const ref = useRef(null)
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) onToggle() }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [open, onToggle])
+
+  return (
+    <div ref={ref} className="absolute top-3 left-3 z-[999]">
+      <button
+        onClick={onToggle}
+        title="Filter by rep"
+        className={`flex items-center gap-2 px-3 py-2 rounded-lg border shadow-lg text-sm font-medium transition-colors ${
+          open || repFilter
+            ? 'bg-blue-600 border-blue-500 text-white'
+            : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'
+        }`}
+      >
+        <Menu size={15} />
+        {repFilter ? repFilter.name : 'All Reps'}
+      </button>
+
+      {open && (
+        <div className="absolute top-11 left-0 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 min-w-52 max-h-80 overflow-y-auto">
+          <button
+            onClick={() => { onSelect(null); onToggle() }}
+            className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5 ${
+              !repFilter ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+            }`}
+          >
+            All Reps
+          </button>
+          <div className="border-t border-slate-700/50 my-1" />
+          {reps.map(rep => (
+            <button
+              key={rep.id}
+              onClick={() => { onSelect(rep); onToggle() }}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                repFilter?.id === rep.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+              }`}
+            >
+              {rep.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function MapPage() {
-  const [zips, setZips] = useState([])
-  const [reps, setReps] = useState([])
-  const [loadingMeta, setLoadingMeta] = useState(true)
-  const [activeZips, setActiveZips] = useState([])
-  const [loadingZips, setLoadingZips] = useState([])
-  const [leadsByZip, setLeadsByZip] = useState({})
-  const [selectedLead, setSelectedLead] = useState(null)
+  const [zips, setZips]           = useState([])
+  const [zipCounts, setZipCounts] = useState({})   // zip → assigned lead count
+  const [reps, setReps]           = useState([])
+  const [loadingMeta, setLoadingMeta]   = useState(true)
+  const [selectedZip, setSelectedZip]   = useState('')
+  const [leads, setLeads]               = useState([])
+  const [loadingLeads, setLoadingLeads] = useState(false)
+  const [repFilter, setRepFilter]       = useState(null)   // null = All Reps
+  const [menuOpen, setMenuOpen]         = useState(false)
+  const [selectedLead, setSelectedLead]   = useState(null)
   const [selectedLeads, setSelectedLeads] = useState([])
-  const [tool, setTool] = useState(null)
-  const [busy, setBusy] = useState(null)
-  const [bulkBusy, setBulkBusy] = useState(false)
+  const [tool, setTool]           = useState(null)
+  const [busy, setBusy]           = useState(null)
+  const [bulkBusy, setBulkBusy]   = useState(false)
   const [bulkProgress, setBulkProgress] = useState([0, 0])
-  const [error, setError] = useState('')
-  const [loadingAll, setLoadingAll] = useState(false)
-  const [allProgress, setAllProgress] = useState([0, 0])
+  const [error, setError]         = useState('')
   const [flyTarget, setFlyTarget] = useState(null)
 
+  // Load ZIPs, reps, and assigned lead counts in parallel
   useEffect(() => {
     async function loadMeta() {
       try {
-        const [zipRes, repRes] = await Promise.all([getZipList(), getAllReps()])
+        const [zipRes, repRes, countRes] = await Promise.all([
+          getZipList(),
+          getAllReps(),
+          getAdminZipStats(),
+        ])
         setZips(zipRes.zips || [])
         setReps(repRes.reps || [])
+        setZipCounts(countRes.counts || {})
       } catch (err) {
-        setError('Failed to load: ' + err.message)
+        setError('Failed to load map data: ' + err.message)
       } finally {
         setLoadingMeta(false)
       }
@@ -450,61 +514,43 @@ export default function MapPage() {
     loadMeta()
   }, [])
 
-  const leads = useMemo(
-    () => activeZips.flatMap(z => leadsByZip[z] || []).filter(l => l.lat && l.lng),
-    [activeZips, leadsByZip]
-  )
+  // Load assigned leads for a ZIP
+  async function selectZip(zip) {
+    if (!zip) {
+      setSelectedZip('')
+      setLeads([])
+      setSelectedLead(null)
+      setSelectedLeads([])
+      return
+    }
+    setSelectedZip(zip)
+    setLoadingLeads(true)
+    setSelectedLead(null)
+    setSelectedLeads([])
+    setError('')
+    try {
+      const res = await getAdminLeadsForZip(zip)
+      setLeads((res.leads || []).filter(l => l.lat && l.lng))
+    } catch (err) {
+      setError(`ZIP ${zip}: ${err.message}`)
+      setLeads([])
+    } finally {
+      setLoadingLeads(false)
+    }
+  }
+
+  // Apply rep filter
+  const filteredLeads = useMemo(() => {
+    if (!repFilter) return leads
+    return leads.filter(l => String(l.assigned_rep_id) === String(repFilter.id))
+  }, [leads, repFilter])
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
 
-  async function fetchZip(zip) {
-    if (leadsByZip[zip]) return leadsByZip[zip]
-    setLoadingZips(prev => [...prev, zip])
-    try {
-      const res = await getAllLeads(zip)
-      const got = res.leads || []
-      setLeadsByZip(prev => ({ ...prev, [zip]: got }))
-      return got
-    } finally {
-      setLoadingZips(prev => prev.filter(z => z !== zip))
-    }
-  }
-
-  async function toggleZip(zip) {
-    if (activeZips.includes(zip)) {
-      setActiveZips(prev => prev.filter(z => z !== zip))
-      return
-    }
-    setActiveZips(prev => [...prev, zip])
-    try {
-      await fetchZip(zip)
-    } catch (err) {
-      setError(`ZIP ${zip}: ${err.message}`)
-      setActiveZips(prev => prev.filter(z => z !== zip))
-    }
-  }
-
-  async function loadAll() {
-    setLoadingAll(true)
-    setError('')
-    setAllProgress([0, zips.length])
-    let done = 0
-    await Promise.allSettled(zips.map(async zip => {
-      try {
-        await fetchZip(zip)
-        setActiveZips(prev => (prev.includes(zip) ? prev : [...prev, zip]))
-      } finally {
-        done++
-        setAllProgress([done, zips.length])
-      }
-    }))
-    setLoadingAll(false)
-  }
-
-  function clearMap() {
-    setActiveZips([])
-    setSelectedLead(null)
-    setSelectedLeads([])
+  function patchLead(leadId, patch) {
+    setLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...patch } : l))
+    setSelectedLead(prev => prev && prev.id === leadId ? { ...prev, ...patch } : prev)
+    setSelectedLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...patch } : l))
   }
 
   function clearSelection() {
@@ -512,20 +558,8 @@ export default function MapPage() {
     setSelectedLeads([])
   }
 
-  function patchLead(leadId, patch) {
-    setLeadsByZip(prev => {
-      const next = {}
-      for (const [zip, list] of Object.entries(prev)) {
-        next[zip] = list.map(l => (l.id === leadId ? { ...l, ...patch } : l))
-      }
-      return next
-    })
-    setSelectedLead(prev => (prev && prev.id === leadId ? { ...prev, ...patch } : prev))
-    setSelectedLeads(prev => prev.map(l => (l.id === leadId ? { ...l, ...patch } : l)))
-  }
-
   function handleMarkerClick(lead) {
-    if (tool) return // drawing takes over while a tool is active
+    if (tool) return
     setSelectedLeads([])
     setSelectedLead(lead)
   }
@@ -563,8 +597,7 @@ export default function MapPage() {
     setBulkBusy(true)
     setError('')
     setBulkProgress([0, targets.length])
-    let done = 0
-    let ok = 0
+    let done = 0, ok = 0
     await Promise.allSettled(targets.map(async lead => {
       try {
         await assignLead(lead.id, rep.id, rep.name, lead.zip)
@@ -577,144 +610,149 @@ export default function MapPage() {
     }))
     setBulkBusy(false)
     const failed = targets.length - ok
-    if (failed > 0) setError(`${ok} assigned, ${failed} failed (leads without a Lead ID can't be assigned yet).`)
+    if (failed > 0) setError(`${ok} assigned, ${failed} failed.`)
     setSelectedLeads([])
   }
 
   const panelOpen = !!selectedLead || selectedLeads.length > 0
-  const unassignedCount = leads.filter(l => !l.assigned_rep_id).length
-  const assignedCount = leads.length - unassignedCount
 
   return (
     <div className="flex flex-col h-full">
-      {/* Top bar */}
-      <div className="px-4 py-3 border-b border-slate-800 bg-slate-900 shrink-0">
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-xl font-bold text-slate-100 shrink-0">Map</h1>
-            <AddressSearch onResult={setFlyTarget} compact />
-          </div>
-          {leads.length > 0 && (
-            <p className="text-slate-400 text-xs mt-0.5 ml-1">
-              {leads.length} leads · <span className="text-blue-400">{unassignedCount} open</span> · <span className="text-orange-400">{assignedCount} assigned</span>
-            </p>
-          )}
-          <div className="flex items-center gap-2">
-            {loadingAll && (
-              <span className="text-xs text-blue-400 flex items-center gap-1.5">
-                <Loader2 size={13} className="animate-spin" />
-                {allProgress[0]} / {allProgress[1]} ZIPs
-              </span>
-            )}
-            <button
-              onClick={loadAll}
-              disabled={loadingMeta || loadingAll}
-              className="text-xs px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-medium transition-colors"
-            >
-              Load All
-            </button>
-            {activeZips.length > 0 && (
-              <button
-                onClick={clearMap}
-                className="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition-colors"
-              >
-                Clear
-              </button>
-            )}
-          </div>
+      {/* ── Top bar ─────────────────────────────────────────────────────────── */}
+      <div className="px-4 py-3 border-b border-slate-800 bg-slate-900 shrink-0 flex flex-wrap items-center gap-3">
+        <h1 className="text-xl font-bold text-slate-100 shrink-0">Map</h1>
+
+        {/* ZIP dropdown */}
+        <div className="relative min-w-40">
+          <select
+            value={selectedZip}
+            onChange={e => selectZip(e.target.value)}
+            disabled={loadingMeta}
+            className="w-full appearance-none bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:border-blue-500 disabled:opacity-50"
+          >
+            <option value="">
+              {loadingMeta ? 'Loading ZIPs…' : 'Select a ZIP…'}
+            </option>
+            {zips.map(zip => (
+              <option key={zip} value={zip}>
+                {zip}{zipCounts[zip] ? ` (${zipCounts[zip]})` : ''}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         </div>
 
-        <div className="flex flex-wrap gap-1.5">
-          {loadingMeta && <span className="text-slate-500 text-xs">Loading ZIPs…</span>}
-          {zips.map(zip => {
-            const active = activeZips.includes(zip)
-            const loading = loadingZips.includes(zip)
-            return (
-              <button
-                key={zip}
-                onClick={() => toggleZip(zip)}
-                className={`text-xs px-2.5 py-1 rounded-lg font-medium transition-colors flex items-center gap-1 ${
-                  active ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-200'
-                }`}
-              >
-                {loading && <Loader2 size={11} className="animate-spin" />}
-                {zip}
-              </button>
-            )
-          })}
-        </div>
+        <AddressSearch onResult={setFlyTarget} compact />
+
+        {loadingLeads && <Loader2 size={16} className="animate-spin text-blue-400 shrink-0" />}
+
+        {filteredLeads.length > 0 && (
+          <span className="text-slate-500 text-xs shrink-0">
+            {filteredLeads.length} leads
+            {repFilter ? <span className="text-blue-400"> · {repFilter.name}</span> : ''}
+          </span>
+        )}
       </div>
 
-      {error && <div className="text-red-400 text-sm px-4 py-2 bg-red-950/30 shrink-0">{error}</div>}
+      {error && (
+        <div className="text-red-400 text-sm px-4 py-2 bg-red-950/30 shrink-0">{error}</div>
+      )}
 
-      {/* Map */}
+      {/* ── Map area ─────────────────────────────────────────────────────────── */}
       <div className="relative flex-1 min-h-0">
-        <MapContainer center={JACKSONVILLE_CENTER} zoom={11} style={{ height: '100%', width: '100%' }} zoomControl={false}>
+        <MapContainer
+          center={JACKSONVILLE_CENTER}
+          zoom={11}
+          style={{ height: '100%', width: '100%' }}
+          zoomControl={false}
+        >
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
           <FlyToLocation coords={flyTarget} />
           {flyTarget && <Marker position={flyTarget} icon={SEARCH_PIN_ICON} />}
           <FitBounds leads={leads} />
           <CenterAndResize focusLead={selectedLead} panelOpen={panelOpen} />
           <ClickToClear enabled={!tool} onClear={clearSelection} />
-          <DrawTool tool={tool} leads={leads} onSelect={handleAreaSelect} />
-          {leads.map(lead => {
-            const isSel = selectedIds.has(lead.id) || (selectedLead && selectedLead.id === lead.id)
-            const color = isSel ? GREEN : lead.assigned_rep_id ? ORANGE : BLUE
+          <DrawTool tool={tool} leads={filteredLeads} onSelect={handleAreaSelect} />
+
+          {/* Pins — colored by status */}
+          {filteredLeads.map(lead => {
+            const isSel = selectedIds.has(lead.id) || (selectedLead?.id === lead.id)
             return (
               <Marker
                 key={lead.id}
                 position={[lead.lat, lead.lng]}
-                icon={leadIcon(color, isSel)}
+                icon={leadIcon(pinColor(lead, isSel), isSel)}
                 eventHandlers={{ click: () => handleMarkerClick(lead) }}
               />
             )
           })}
         </MapContainer>
 
-        {/* Legend */}
-        <div className="absolute top-3 left-3 z-[999] bg-slate-900/90 rounded-lg px-3 py-2 text-xs text-slate-300 space-y-1 pointer-events-none">
-          <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full inline-block" style={{ background: BLUE }} /> Open</div>
-          <div className="flex items-center gap-2"><span className="w-3 h-3 rounded-full inline-block" style={{ background: ORANGE }} /> Assigned</div>
-        </div>
+        {/* Rep filter menu (top-left) */}
+        <RepMenu
+          reps={reps}
+          repFilter={repFilter}
+          onSelect={setRepFilter}
+          open={menuOpen}
+          onToggle={() => setMenuOpen(o => !o)}
+        />
 
-        {/* Tool buttons */}
+        {/* Lasso / radius tools (top-right) */}
         <div className="absolute top-3 right-3 z-[999] flex flex-col gap-2">
           <button
             onClick={() => setTool(t => (t === 'lasso' ? null : 'lasso'))}
             title="Lasso select"
-            className={`p-2 rounded-lg border shadow-lg transition-colors ${tool === 'lasso' ? 'bg-green-600 border-green-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}
+            className={`p-2 rounded-lg border shadow-lg transition-colors ${
+              tool === 'lasso'
+                ? 'bg-green-600 border-green-500 text-white'
+                : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'
+            }`}
           >
             <Lasso size={16} />
           </button>
           <button
             onClick={() => setTool(t => (t === 'radius' ? null : 'radius'))}
             title="Radius select"
-            className={`p-2 rounded-lg border shadow-lg transition-colors ${tool === 'radius' ? 'bg-green-600 border-green-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}
+            className={`p-2 rounded-lg border shadow-lg transition-colors ${
+              tool === 'radius'
+                ? 'bg-green-600 border-green-500 text-white'
+                : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'
+            }`}
           >
             <Target size={16} />
           </button>
         </div>
 
-        {/* Tool hint */}
+        {/* Draw hint */}
         {tool && (
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[999] bg-green-900/90 text-green-200 text-xs px-3 py-1.5 rounded-lg shadow-lg pointer-events-none">
             {tool === 'lasso' ? 'Draw a loop around leads to select' : 'Drag out from a center point to select'}
           </div>
         )}
 
+        {/* Status legend (bottom-left) */}
+        <div className="absolute bottom-4 left-3 z-[999] bg-slate-900/90 rounded-lg px-3 py-2 text-xs text-slate-300 space-y-1 pointer-events-none">
+          {STATUS_LEGEND.map(([label, color]) => (
+            <div key={label} className="flex items-center gap-2">
+              <span className="w-3 h-3 rounded-full inline-block shrink-0" style={{ background: color }} />
+              {label}
+            </div>
+          ))}
+        </div>
+
         {/* Empty state */}
-        {activeZips.length === 0 && !loadingAll && (
+        {!selectedZip && !loadingLeads && (
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="bg-slate-900/80 rounded-xl px-5 py-4 text-center">
               <MapPin size={28} className="text-slate-600 mb-2 mx-auto" />
-              <div className="text-slate-300 text-sm font-medium">Select a ZIP to plot leads</div>
-              <div className="text-slate-500 text-xs mt-1">or tap Load All for the full territory</div>
+              <div className="text-slate-300 text-sm font-medium">Select a ZIP to view assigned leads</div>
+              <div className="text-slate-500 text-xs mt-1">Number in dropdown = leads assigned to any rep</div>
             </div>
           </div>
         )}
       </div>
 
-      {/* Bottom panel: single profile or multi-select */}
+      {/* ── Bottom panels ─────────────────────────────────────────────────────── */}
       {selectedLead && (
         <SingleLeadPanel
           lead={selectedLead}
