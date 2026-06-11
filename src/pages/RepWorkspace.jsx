@@ -11,8 +11,9 @@ import {
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
   claimLeadsBulk, unassignLeadsBulk, getLeadsNearPin, getLeadsInBounds,
   createAppointment, getAppointmentsForRep, deleteAppointment,
+  getDashboardStats, getRecentActivity, getAppointmentsForAdmin,
 } from '../api/sheets.js'
-import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2, BarChart2, ChevronDown, ChevronUp } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
@@ -1318,6 +1319,212 @@ function RepCalendar({ rep, myLeads, active }) {
   )
 }
 
+// ── Manager Overview tab ─────────────────────────────────────────────────────
+
+const OV_STATUS = [
+  { key: 'open',      label: 'Open',      color: 'text-slate-300',   bar: 'bg-slate-500'  },
+  { key: 'claimed',   label: 'Claimed',   color: 'text-blue-300',    bar: 'bg-blue-600'   },
+  { key: 'contacted', label: 'Contacted', color: 'text-yellow-300',  bar: 'bg-yellow-500' },
+  { key: 'follow_up', label: 'Follow Up', color: 'text-orange-300',  bar: 'bg-orange-500' },
+  { key: 'working',   label: 'Working',   color: 'text-green-300',   bar: 'bg-green-500'  },
+  { key: 'closed',    label: 'Closed',    color: 'text-purple-300',  bar: 'bg-purple-500' },
+]
+
+function RepManagerOverview() {
+  const [stats,    setStats]    = useState(null)
+  const [appts,    setAppts]    = useState([])
+  const [activity, setActivity] = useState([])
+  const [loading,  setLoading]  = useState(true)
+  const [loadedAt, setLoadedAt] = useState(0)
+  const [actOpen,  setActOpen]  = useState(false)
+
+  async function load() {
+    setLoading(true)
+    try {
+      const [s, a, act] = await Promise.all([
+        getDashboardStats(),
+        getAppointmentsForAdmin(),
+        getRecentActivity(25),
+      ])
+      setStats(s)
+      setAppts(a.appointments || [])
+      setActivity(act.entries || [])
+      setLoadedAt(Date.now())
+    } catch { /* silently fail — not critical */ }
+    finally { setLoading(false) }
+  }
+
+  useEffect(() => { load() }, [])
+
+  // Upcoming appointments — next 7 days
+  const now    = new Date()
+  const cutoff = new Date(now.getTime() + 7 * 86400000)
+  const upcoming = appts.filter(a => { const d = new Date(a.scheduled_at); return d >= now && d <= cutoff })
+  const byDay  = {}
+  upcoming.forEach(a => { const k = a.scheduled_at.slice(0,10); (byDay[k] = byDay[k] || []).push(a) })
+  const apptDays = Object.keys(byDay).sort()
+  const todayKey = calDateStr(new Date())
+
+  function timeAgo(ts) {
+    if (!ts) return ''
+    const m = Math.floor((loadedAt - new Date(ts).getTime()) / 60000)
+    if (m < 1) return 'just now'
+    if (m < 60) return `${m}m ago`
+    const h = Math.floor(m / 60)
+    if (h < 24) return `${h}h ago`
+    return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  }
+
+  const repNameMap = stats ? Object.fromEntries(stats.repStats.map(r => [r.id, r.name])) : {}
+
+  return (
+    <div className="h-full overflow-y-auto bg-slate-950">
+      <div className="p-4 flex flex-col gap-4">
+
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div className="text-slate-100 font-bold text-base">Overview</div>
+          <button onClick={load} disabled={loading} className="text-slate-400 hover:text-slate-200">
+            <RefreshCw size={14} className={loading ? 'animate-spin text-blue-400' : ''} />
+          </button>
+        </div>
+
+        {loading && <div className="text-slate-500 text-sm py-4 text-center">Loading…</div>}
+
+        {!loading && stats && <>
+
+          {/* Upcoming Appointments */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <Calendar size={13} className="text-blue-400" />
+                <span className="text-slate-200 font-semibold text-sm">Upcoming Appointments</span>
+              </div>
+              <span className="text-slate-500 text-xs">{upcoming.length} this week</span>
+            </div>
+            {upcoming.length === 0
+              ? <div className="px-4 py-3 text-slate-500 text-sm">No appointments in the next 7 days.</div>
+              : <div className="px-4 py-3 flex flex-col gap-3">
+                  {apptDays.map(day => (
+                    <div key={day}>
+                      <div className="text-xs text-slate-400 font-semibold uppercase tracking-wide mb-1.5">
+                        {day === todayKey ? '🟢 Today' : calFmtDay(day)}
+                      </div>
+                      {byDay[day].map(a => (
+                        <div key={a.id} className="flex items-center gap-2 text-sm bg-slate-800/50 rounded-lg px-3 py-2 mb-1">
+                          <span className="text-slate-400 text-xs font-mono w-16 shrink-0">
+                            {new Date(a.scheduled_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
+                          </span>
+                          <span className="text-slate-100 truncate flex-1">{a.leads?.address || '—'}</span>
+                          <span className="text-blue-300 text-xs shrink-0">{a.reps?.name || '—'}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+            }
+          </div>
+
+          {/* Market Overview */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+            <div className="flex items-baseline justify-between mb-3">
+              <span className="text-slate-200 font-semibold text-sm">Market Overview</span>
+              <span className="text-2xl font-bold text-slate-100">{stats.totals.total.toLocaleString()}</span>
+            </div>
+            <div className="flex flex-col gap-2">
+              {OV_STATUS.map(({ key, label, color, bar }) => {
+                const count = stats.totals[key] || 0
+                const pct   = stats.totals.total > 0 ? Math.round((count / stats.totals.total) * 100) : 0
+                return (
+                  <div key={key} className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500 w-16 shrink-0">{label}</span>
+                    <div className="flex-1 bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                      <div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+                    </div>
+                    <span className={`text-xs font-mono font-semibold w-12 text-right ${color}`}>{count.toLocaleString()}</span>
+                    <span className="text-xs text-slate-600 w-7 text-right">{pct}%</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Rep Breakdown */}
+          <div>
+            <div className="text-slate-500 text-xs font-semibold uppercase tracking-wider mb-2">
+              Reps ({stats.repStats.length})
+            </div>
+            <div className="flex flex-col gap-2">
+              {stats.repStats.map(r => {
+                const capPct = Math.min(100, Math.round((r.claimed / 500) * 100))
+                const capBar = capPct >= 90 ? 'bg-red-500' : capPct >= 70 ? 'bg-yellow-500' : 'bg-blue-600'
+                return (
+                  <div key={r.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-slate-100 font-semibold text-sm">{r.name}</span>
+                      <span className="text-slate-500 text-xs">{(r.claimed + r.contacted + r.working + r.closed).toLocaleString()} leads</span>
+                    </div>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-500">No Contact</span>
+                      <span className="text-slate-400">{r.claimed} / 500</span>
+                    </div>
+                    <div className="bg-slate-800 rounded-full h-1.5 mb-3 overflow-hidden">
+                      <div className={`h-full rounded-full ${capBar}`} style={{ width: `${capPct}%` }} />
+                    </div>
+                    <div className="grid grid-cols-4 gap-1 text-center">
+                      {[
+                        { label: 'Contacted', value: r.contacted, color: 'text-yellow-300' },
+                        { label: 'Follow Up', value: r.follow_up, color: 'text-orange-300' },
+                        { label: 'Working',   value: r.working,   color: 'text-green-300'  },
+                        { label: 'Closed',    value: r.closed,    color: 'text-purple-300' },
+                      ].map(s => (
+                        <div key={s.label}>
+                          <div className={`text-sm font-bold tabular-nums ${s.color}`}>{s.value}</div>
+                          <div className="text-slate-600 text-[10px]">{s.label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Activity Feed */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <button
+              onClick={() => setActOpen(o => !o)}
+              className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-800/50 transition-colors"
+            >
+              <span className="text-slate-200 font-semibold text-sm">Recent Activity</span>
+              <div className="flex items-center gap-2">
+                {!actOpen && <span className="text-slate-500 text-xs">{activity.length} entries</span>}
+                {actOpen ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
+              </div>
+            </button>
+            {actOpen && (
+              <div className="px-4 pb-4 flex flex-col divide-y divide-slate-800">
+                {activity.map((e, i) => (
+                  <div key={e.id || i} className="flex items-start gap-2 py-2 text-xs">
+                    <span className="text-slate-600 w-14 shrink-0 pt-px">{timeAgo(e.ts)}</span>
+                    <span className="text-slate-300 w-24 shrink-0">
+                      {ACTION_LABELS[e.action] || e.action}
+                      {e.action === 'status_update' && e.status ? <span className="text-slate-500"> {e.status}</span> : null}
+                    </span>
+                    <span className="text-blue-400 font-medium w-20 shrink-0 truncate">{repNameMap[e.rep_id] || e.rep_id || '—'}</span>
+                    {e.notes && <span className="text-slate-500 truncate">{e.notes}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+        </>}
+      </div>
+    </div>
+  )
+}
+
 // ── Placeholder tabs ─────────────────────────────────────────────────────────
 
 function Placeholder({ title, lines }) {
@@ -1331,13 +1538,14 @@ function Placeholder({ title, lines }) {
 
 // ── Shell ────────────────────────────────────────────────────────────────────
 
-const TABS = [
-  { id: 'dashboard', label: 'Home', icon: LayoutDashboard },
-  { id: 'map', label: 'Map', icon: MapIcon },
-  { id: 'leads', label: 'Leads', icon: List },
-  { id: 'docs', label: 'Docs', icon: FileText },
-  { id: 'calendar', label: 'Calendar', icon: Calendar },
+const BASE_TABS = [
+  { id: 'dashboard', label: 'Home',     icon: LayoutDashboard },
+  { id: 'map',       label: 'Map',      icon: MapIcon         },
+  { id: 'leads',     label: 'Leads',    icon: List            },
+  { id: 'docs',      label: 'Docs',     icon: FileText        },
+  { id: 'calendar',  label: 'Calendar', icon: Calendar        },
 ]
+const MANAGER_TAB = { id: 'overview', label: 'Overview', icon: BarChart2 }
 
 export default function RepWorkspace() {
   const { repSlug } = useParams()
@@ -1395,6 +1603,8 @@ export default function RepWorkspace() {
 
   if (!rep) return <RepLogin lockedSlug={repSlug || ''} onUnlock={unlock} />
 
+  const tabs = rep.is_manager ? [...BASE_TABS, MANAGER_TAB] : BASE_TABS
+
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col">
       {/* Top bar */}
@@ -1410,11 +1620,11 @@ export default function RepWorkspace() {
 
       {/* Tab nav */}
       <div className="flex shrink-0 bg-slate-900 border-b border-slate-800 overflow-x-auto">
-        {TABS.map(({ id, label, icon: Icon }) => (
+        {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setTab(id)}
-            className={`flex-1 min-w-16 flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition-colors ${tab === id ? 'text-blue-400 border-b-2 border-blue-500' : 'text-slate-500'}`}
+            className={`flex-1 min-w-14 flex flex-col items-center gap-0.5 py-2 text-[11px] font-medium transition-colors ${tab === id ? 'text-blue-400 border-b-2 border-blue-500' : 'text-slate-500'}`}
           >
             <Icon size={18} />
             {label}
@@ -1454,6 +1664,7 @@ export default function RepWorkspace() {
           />
         )}
         {tab === 'docs' && <Placeholder title="Documents" lines="Upload and access your documents here (coming soon)." />}
+        {tab === 'overview' && rep.is_manager && <RepManagerOverview />}
         {tab === 'calendar' && (
           <RepCalendar
             rep={rep}

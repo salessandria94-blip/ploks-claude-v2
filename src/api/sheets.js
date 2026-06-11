@@ -32,7 +32,7 @@ async function insertLog(action, leadId, repId, status = '', notes = '') {
 export async function validatePin(repSlug, pin) {
   const { data, error } = await supabase
     .from('reps')
-    .select('id, name, slug')
+    .select('id, name, slug, is_manager')
     .eq('slug', repSlug)
     .eq('pin', pin)
     .single()
