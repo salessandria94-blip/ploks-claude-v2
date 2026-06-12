@@ -13,6 +13,7 @@ import {
   createAppointment, getAppointmentsForRep, deleteAppointment, pingRepLocation,
 } from '../api/sheets.js'
 import AdminDashboard from './Dashboard.jsx'
+import SalesManagerWorkspace from './SalesManagerWorkspace.jsx'
 import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
@@ -1613,6 +1614,9 @@ export default function RepWorkspace() {
   }
 
   if (!rep) return <RepLogin lockedSlug={repSlug || ''} onUnlock={unlock} />
+
+  // Sales Manager gets the full admin-style workspace
+  if (rep.is_manager) return <SalesManagerWorkspace rep={rep} onLogout={logout} />
 
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col">
