@@ -412,7 +412,7 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
   const [repId, setRepId] = useState('')
   const rep = reps.find(r => r.id === repId)
   return (
-    <div className="shrink-0 border-t border-slate-800 bg-slate-900 max-h-72 overflow-auto">
+    <div className="shrink-0 border-t border-slate-800 bg-slate-900">
       <div className="p-4">
         <div className="flex items-center justify-between mb-3">
           <div className="text-white font-semibold text-base">{leads.length} leads selected</div>
@@ -420,7 +420,7 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
             <Trash2 size={14} /> Clear
           </button>
         </div>
-        <div className="flex flex-wrap items-center gap-2 mb-3">
+        <div className="flex flex-wrap items-center gap-2">
           <select
             value={repId}
             onChange={e => setRepId(e.target.value)}
@@ -435,16 +435,8 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
             disabled={!rep || bulkBusy}
             className="text-sm px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium transition-colors"
           >
-            {bulkBusy ? `Assigning ${bulkProgress[0]}/${bulkProgress[1]}…` : `Assign all to ${rep ? rep.name : 'rep'}`}
+            {bulkBusy ? `Assigning ${bulkProgress[0]}/${bulkProgress[1]}…` : 'Assign'}
           </button>
-        </div>
-        <div className="flex flex-col gap-1 max-h-32 overflow-auto text-xs">
-          {leads.map(l => (
-            <div key={l.id} className="flex justify-between gap-3 text-slate-400">
-              <span className="truncate">{l.address}</span>
-              <span className="shrink-0 text-slate-600">{l.assigned_rep || 'open'}</span>
-            </div>
-          ))}
         </div>
       </div>
     </div>
