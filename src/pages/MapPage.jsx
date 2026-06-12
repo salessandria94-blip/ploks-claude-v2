@@ -473,7 +473,6 @@ function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations, stat
         }`}
       >
         <Menu size={15} />
-        {repFilter ? repFilter.name : 'All Reps'}
         {repFilter && activeRepIds.has(repFilter.id) && (
           <Navigation size={12} className="text-green-400 fill-green-400" />
         )}
