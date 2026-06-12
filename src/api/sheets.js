@@ -45,7 +45,7 @@ export async function validatePin(repSlug, pin) {
 export async function getAllReps() {
   const { data, error } = await supabase
     .from('reps')
-    .select('id, name, slug, phone, email, pin, is_manager')
+    .select('id, name, slug, phone, email, pin')
     .eq('active', true)
     .order('name')
   if (error) throw new Error(error.message)
