@@ -734,6 +734,7 @@ export default function MapPage() {
   }
 
   const handleAreaSelect = useCallback((sel, geometry) => {
+    setTool(null)
     setSelectedLead(null)
     setSelectedLeads(sel)
     if (!geometry) return
