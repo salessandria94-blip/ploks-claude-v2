@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import {
   getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity,
@@ -651,6 +651,17 @@ export default function MapPage() {
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
 
+  // Rep quick-stats computed from already-loaded leads (no extra API call)
+  const repStats = useMemo(() => {
+    const out = {}
+    reps.forEach(r => {
+      const rl = allLeads.filter(l => String(l.assigned_rep_id) === String(r.id))
+      const s = k => rl.filter(l => (l.status || '').toLowerCase() === k).length
+      out[r.id] = { assigned: rl.length, contacted: s('contacted'), working: s('working'), closed: s('closed') }
+    })
+    return out
+  }, [reps, allLeads])
+
   function handleRepSelect(rep) {
     setRepFilter(rep)
     setZipFilter('')            // ZIP options change when rep changes — reset
@@ -728,6 +739,16 @@ export default function MapPage() {
 
   return (
     <div className="flex flex-col h-full">
+      <style>{`
+        .rep-stat-popup .leaflet-popup-content-wrapper {
+          background: #0f172a; border: 1px solid #1e293b; border-radius: 12px;
+          box-shadow: 0 8px 32px rgba(0,0,0,0.8); padding: 0; color: #f1f5f9;
+        }
+        .rep-stat-popup .leaflet-popup-content { margin: 0; }
+        .rep-stat-popup .leaflet-popup-tip-container .leaflet-popup-tip { background: #0f172a; }
+        .rep-stat-popup .leaflet-popup-close-button { color: #475569 !important; top: 8px !important; right: 10px !important; font-size: 18px !important; }
+        .rep-stat-popup .leaflet-popup-close-button:hover { color: #94a3b8 !important; }
+      `}</style>
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
       <div className="px-4 py-3 border-b border-slate-800 bg-slate-900 shrink-0 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-bold text-slate-100 shrink-0">Map</h1>
@@ -798,16 +819,47 @@ export default function MapPage() {
             )
           })}
 
-          {/* Rep location dots — sky-blue, show only if GPS is active & fresh */}
+          {/* Rep location dots — sky-blue, click for quick-stats popup */}
           {repLocations.map(loc => {
             const r = reps.find(r => r.id === loc.rep_id)
+            const st = repStats[loc.rep_id] || {}
             return r ? (
-              <Marker
-                key={loc.rep_id}
-                position={[loc.lat, loc.lng]}
-                icon={repLocIcon(r.name)}
-                zIndexOffset={2000}
-              />
+              <Marker key={loc.rep_id} position={[loc.lat, loc.lng]} icon={repLocIcon(r.name)} zIndexOffset={2000}>
+                <Popup className="rep-stat-popup" minWidth={230} maxWidth={280}>
+                  <div style={{ padding: '12px 14px', fontFamily: 'inherit' }}>
+                    {/* Header */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: '#f1f5f9', lineHeight: 1.2 }}>{r.name}</div>
+                        {r.email && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 3 }}>✉ {r.email}</div>}
+                        {r.phone && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 1 }}>✆ {r.phone}</div>}
+                      </div>
+                      <a
+                        href={`/field/${r.slug}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ fontSize: 11, background: '#16a34a', color: 'white', padding: '4px 9px', borderRadius: 6, textDecoration: 'none', whiteSpace: 'nowrap', marginLeft: 10, marginTop: 2 }}
+                      >
+                        Field View ↗
+                      </a>
+                    </div>
+                    {/* Stats row */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 4, borderTop: '1px solid #1e293b', paddingTop: 10 }}>
+                      {[
+                        { label: 'Assigned',  val: st.assigned  || 0, color: '#60a5fa' },
+                        { label: 'Contacted', val: st.contacted || 0, color: '#f59e0b' },
+                        { label: 'Working',   val: st.working   || 0, color: '#a855f7' },
+                        { label: 'Closed',    val: st.closed    || 0, color: '#6b7280' },
+                      ].map(({ label, val, color }) => (
+                        <div key={label} style={{ textAlign: 'center' }}>
+                          <div style={{ fontSize: 18, fontWeight: 700, color, lineHeight: 1 }}>{val}</div>
+                          <div style={{ fontSize: 9, color: '#64748b', marginTop: 2, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{label}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </Popup>
+              </Marker>
             ) : null
           })}
         </MapContainer>
