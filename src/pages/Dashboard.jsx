@@ -1,16 +1,44 @@
 import { useState, useEffect } from 'react'
-import { RefreshCw, ChevronDown, ChevronUp, Calendar } from 'lucide-react'
-import { getDashboardStats, getRecentActivity, getAppointmentsForAdmin } from '../api/sheets.js'
+import { RefreshCw, ChevronDown, ChevronUp, Calendar, Navigation } from 'lucide-react'
+import { getDashboardStats, getRecentActivity, getAppointmentsForAdmin, getRepLocations } from '../api/sheets.js'
 
 const CAP = 500
 
+// ── Universal PLOKS color system ───────────────────────────────────────────────
+const PLOKS_COLORS = {
+  no_contact: '#22c55e',
+  contacted:  '#f59e0b',
+  working:    '#a855f7',
+  follow_up:  '#ef4444',
+  closed:     '#6b7280',
+  open:       '#475569',
+}
+
+// Market Overview rows
 const STATUS_CONFIG = [
-  { key: 'open',      label: 'Open',      bar: 'bg-slate-500',  text: 'text-slate-300'  },
-  { key: 'claimed',   label: 'Claimed',   bar: 'bg-blue-600',   text: 'text-blue-300'   },
-  { key: 'contacted', label: 'Contacted', bar: 'bg-yellow-500', text: 'text-yellow-300' },
-  { key: 'follow_up', label: 'Follow Up', bar: 'bg-orange-500', text: 'text-orange-300' },
-  { key: 'working',   label: 'Working',   bar: 'bg-green-500',  text: 'text-green-300'  },
-  { key: 'closed',    label: 'Closed',    bar: 'bg-purple-500', text: 'text-purple-300' },
+  { key: 'open',      label: 'Open',       color: PLOKS_COLORS.open       },
+  { key: 'claimed',   label: 'No Contact', color: PLOKS_COLORS.no_contact },
+  { key: 'contacted', label: 'Contacted',  color: PLOKS_COLORS.contacted  },
+  { key: 'follow_up', label: 'Follow Up',  color: PLOKS_COLORS.follow_up  },
+  { key: 'working',   label: 'Working',    color: PLOKS_COLORS.working    },
+  { key: 'closed',    label: 'Closed',     color: PLOKS_COLORS.closed     },
+]
+
+// Rep card Apple-style bar segments (ordered visually)
+const REP_SEGMENTS = [
+  { key: 'claimed',   label: 'No Contact', color: PLOKS_COLORS.no_contact },
+  { key: 'contacted', label: 'Contacted',  color: PLOKS_COLORS.contacted  },
+  { key: 'working',   label: 'Working',    color: PLOKS_COLORS.working    },
+  { key: 'follow_up', label: 'Follow Up',  color: PLOKS_COLORS.follow_up  },
+  { key: 'closed',    label: 'Closed',     color: PLOKS_COLORS.closed     },
+]
+
+// ZIP leaderboard bar segments
+const ZIP_SEGMENTS = [
+  { key: 'contacted', color: PLOKS_COLORS.contacted, label: 'Contacted' },
+  { key: 'working',   color: PLOKS_COLORS.working,   label: 'Working'   },
+  { key: 'follow_up', color: PLOKS_COLORS.follow_up, label: 'Follow Up' },
+  { key: 'closed',    color: PLOKS_COLORS.closed,    label: 'Closed'    },
 ]
 
 const ACTION_LABELS = {
@@ -26,15 +54,15 @@ const ACTION_LABELS = {
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
 
-function StatRow({ label, count, total, bar, text }) {
+function StatRow({ label, count, total, color }) {
   const pct = total > 0 ? Math.round((count / total) * 100) : 0
   return (
     <div className="flex items-center gap-3">
-      <span className="w-20 text-xs text-slate-400 shrink-0">{label}</span>
+      <span className="w-24 text-xs text-slate-400 shrink-0">{label}</span>
       <div className="flex-1 bg-slate-800 rounded-full h-1.5 overflow-hidden">
-        <div className={`h-full rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} />
       </div>
-      <span className={`w-14 text-right text-xs font-mono font-semibold ${text}`}>
+      <span className="w-14 text-right text-xs font-mono font-semibold" style={{ color }}>
         {count.toLocaleString()}
       </span>
       <span className="w-8 text-right text-xs text-slate-500">{pct}%</span>
@@ -56,8 +84,7 @@ function MarketOverviewCard({ totals }) {
             label={s.label}
             count={totals[s.key] || 0}
             total={totals.total}
-            bar={s.bar}
-            text={s.text}
+            color={s.color}
           />
         ))}
       </div>
@@ -65,42 +92,67 @@ function MarketOverviewCard({ totals }) {
   )
 }
 
-function RepCard({ rep }) {
-  const capPct  = Math.min(100, CAP > 0 ? Math.round((rep.claimed / CAP) * 100) : 0)
-  const capBar  = capPct >= 90 ? 'bg-red-500' : capPct >= 70 ? 'bg-yellow-500' : 'bg-blue-600'
-  const capText = capPct >= 90 ? 'text-red-400' : capPct >= 70 ? 'text-yellow-400' : 'text-slate-400'
-  const total   = rep.claimed + rep.contacted + rep.follow_up + rep.working + rep.closed
+function RepCard({ rep, isOnline }) {
+  const total = (rep.claimed || 0) + (rep.contacted || 0) + (rep.follow_up || 0) + (rep.working || 0) + (rep.closed || 0)
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col gap-3">
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <span className="text-slate-100 font-semibold">{rep.name}</span>
-        <span className="text-xs text-slate-500">{total.toLocaleString()} leads</span>
+        {/* Live status indicator */}
+        <div className="flex items-center gap-1.5">
+          {isOnline ? (
+            <>
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
+              </span>
+              <Navigation size={12} className="text-green-400 fill-green-400" />
+            </>
+          ) : (
+            <>
+              <span className="relative flex h-2 w-2">
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-600" />
+              </span>
+              <Navigation size={12} className="text-slate-600 fill-slate-600" />
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Cap gauge */}
+      {/* Apple-style segmented bar against CAP */}
       <div>
-        <div className="flex justify-between text-xs mb-1">
-          <span className="text-slate-400">Claimed (No Contact)</span>
-          <span className={capText}>{rep.claimed} / {CAP}</span>
+        <div className="flex justify-between text-xs mb-1.5">
+          <span className="text-slate-400">{total.toLocaleString()} / {CAP}</span>
         </div>
-        <div className="bg-slate-800 rounded-full h-2 overflow-hidden">
-          <div className={`h-full rounded-full transition-all ${capBar}`} style={{ width: `${capPct}%` }} />
+        <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-800 w-full">
+          {REP_SEGMENTS.map(s => {
+            const pct = CAP > 0 ? ((rep[s.key] || 0) / CAP) * 100 : 0
+            if (pct <= 0) return null
+            return (
+              <div
+                key={s.key}
+                style={{ width: `${pct}%`, background: s.color }}
+                title={`${s.label}: ${rep[s.key] || 0}`}
+              />
+            )
+          })}
         </div>
       </div>
 
-      {/* Status breakdown */}
+      {/* Status breakdown grid */}
       <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 pt-1">
         {[
-          { label: 'Contacted',  value: rep.contacted, color: 'text-yellow-300' },
-          { label: 'Follow Up',  value: rep.follow_up, color: 'text-orange-300' },
-          { label: 'Working',    value: rep.working,   color: 'text-green-300'  },
-          { label: 'Closed',     value: rep.closed,    color: 'text-purple-300' },
+          { label: 'Contacted', value: rep.contacted || 0, color: PLOKS_COLORS.contacted },
+          { label: 'Working',   value: rep.working   || 0, color: PLOKS_COLORS.working   },
+          { label: 'Follow Up', value: rep.follow_up || 0, color: PLOKS_COLORS.follow_up },
+          { label: 'Closed',    value: rep.closed    || 0, color: PLOKS_COLORS.closed    },
         ].map(s => (
           <div key={s.label} className="flex justify-between items-center">
             <span className="text-xs text-slate-500">{s.label}</span>
-            <span className={`text-xs font-mono font-semibold ${s.color}`}>{s.value}</span>
+            <span className="text-xs font-mono font-semibold" style={{ color: s.color }}>{s.value}</span>
           </div>
         ))}
       </div>
@@ -109,12 +161,6 @@ function RepCard({ rep }) {
 }
 
 const TOP = 5
-const ZIP_SEGMENTS = [
-  { key: 'contacted', color: '#eab308', label: 'Contacted' },
-  { key: 'follow_up', color: '#f97316', label: 'Follow Up' },
-  { key: 'working',   color: '#22c55e', label: 'Working'   },
-  { key: 'closed',    color: '#a855f7', label: 'Closed'    },
-]
 
 function ZipSegmentBar({ z }) {
   const total = z.total || 1
@@ -150,7 +196,6 @@ function ZipLeaderboardCard({ zipStats }) {
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
 
-      {/* Header — static, no collapse */}
       <div className="flex items-center justify-between px-5 py-4">
         <h2 className="text-slate-100 font-semibold text-sm uppercase tracking-wider">
           Top ZIPs by Activity
@@ -159,84 +204,78 @@ function ZipLeaderboardCard({ zipStats }) {
       </div>
 
       <div className="px-5 pb-5">
-
-          {/* ZIP rows */}
-          <div className="flex flex-col gap-1.5">
-            {visible.map((z, i) => {
-              const isActive = activeZip === z.zip
-              const openCount = z.total - z.contacted - z.follow_up - z.working - z.closed
-              return (
-                <div
-                  key={z.zip}
-                  onClick={() => toggleZip(z.zip)}
-                  className={`rounded-lg px-3 py-2.5 cursor-pointer border transition-all ${
-                    isActive
-                      ? 'border-blue-500 bg-slate-800'
-                      : 'border-slate-800 hover:border-slate-600 hover:bg-slate-800/60'
-                  }`}
-                >
-                  {/* Row header */}
-                  <div className="flex items-center gap-2.5 mb-2">
-                    <span className="text-xs text-slate-500 w-4 shrink-0 text-right">{i + 1}</span>
-                    <span className="text-sm font-mono font-semibold text-slate-200 w-12 shrink-0">{z.zip}</span>
-                    <span className="text-xs text-slate-500 ml-auto">{z.total.toLocaleString()} leads</span>
-                  </div>
-
-                  {/* iPhone-style segmented bar */}
-                  <ZipSegmentBar z={z} />
-
-                  {/* Expanded raw numbers */}
-                  {isActive && (
-                    <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 pt-2.5 border-t border-slate-700">
-                      <div className="flex justify-between">
-                        <span className="text-xs text-slate-500">Open / Unclaimed</span>
-                        <span className="text-xs font-mono font-semibold text-slate-400">{openCount.toLocaleString()}</span>
-                      </div>
-                      {ZIP_SEGMENTS.map(s => (
-                        <div key={s.key} className="flex justify-between">
-                          <span className="text-xs text-slate-500">{s.label}</span>
-                          <span className="text-xs font-mono font-semibold" style={{ color: s.color }}>
-                            {z[s.key].toLocaleString()}
-                          </span>
-                        </div>
-                      ))}
-                      <div className="col-span-2 flex justify-between border-t border-slate-700 pt-1.5 mt-0.5">
-                        <span className="text-xs text-slate-400 font-medium">Total</span>
-                        <span className="text-xs font-mono font-semibold text-slate-300">{z.total.toLocaleString()}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-
-          {/* Footer: legend + show all toggle */}
-          <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800">
-            <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
-              {ZIP_SEGMENTS.map(s => (
-                <span key={s.key} className="flex items-center gap-1">
-                  <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: s.color }} />
-                  {s.label}
-                </span>
-              ))}
-              <span className="flex items-center gap-1">
-                <span className="w-2.5 h-2.5 rounded-sm inline-block bg-slate-600" />
-                Open
-              </span>
-            </div>
-            {zipStats.length > TOP && (
-              <button
-                onClick={e => { e.stopPropagation(); setShowAll(a => !a) }}
-                className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors shrink-0 ml-3"
+        <div className="flex flex-col gap-1.5">
+          {visible.map((z, i) => {
+            const isActive = activeZip === z.zip
+            const openCount = z.total - z.contacted - z.follow_up - z.working - z.closed
+            return (
+              <div
+                key={z.zip}
+                onClick={() => toggleZip(z.zip)}
+                className={`rounded-lg px-3 py-2.5 cursor-pointer border transition-all ${
+                  isActive
+                    ? 'border-blue-500 bg-slate-800'
+                    : 'border-slate-800 hover:border-slate-600 hover:bg-slate-800/60'
+                }`}
               >
-                {showAll
-                  ? <><ChevronUp size={12} /> Show less</>
-                  : <><ChevronDown size={12} /> All {zipStats.length}</>}
-              </button>
-            )}
-          </div>
+                <div className="flex items-center gap-2.5 mb-2">
+                  <span className="text-xs text-slate-500 w-4 shrink-0 text-right">{i + 1}</span>
+                  <span className="text-sm font-mono font-semibold text-slate-200 w-12 shrink-0">{z.zip}</span>
+                  <span className="text-xs text-slate-500 ml-auto">{z.total.toLocaleString()} leads</span>
+                </div>
 
+                <ZipSegmentBar z={z} />
+
+                {isActive && (
+                  <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-1.5 pt-2.5 border-t border-slate-700">
+                    <div className="flex justify-between">
+                      <span className="text-xs text-slate-500">Open</span>
+                      <span className="text-xs font-mono font-semibold text-slate-400">{openCount.toLocaleString()}</span>
+                    </div>
+                    {ZIP_SEGMENTS.map(s => (
+                      <div key={s.key} className="flex justify-between">
+                        <span className="text-xs text-slate-500">{s.label}</span>
+                        <span className="text-xs font-mono font-semibold" style={{ color: s.color }}>
+                          {z[s.key].toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                    <div className="col-span-2 flex justify-between border-t border-slate-700 pt-1.5 mt-0.5">
+                      <span className="text-xs text-slate-400 font-medium">Total</span>
+                      <span className="text-xs font-mono font-semibold text-slate-300">{z.total.toLocaleString()}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Footer: legend + show all toggle */}
+        <div className="flex items-center justify-between mt-4 pt-3 border-t border-slate-800">
+          <div className="flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+            {ZIP_SEGMENTS.map(s => (
+              <span key={s.key} className="flex items-center gap-1">
+                <span className="w-2.5 h-2.5 rounded-sm inline-block" style={{ background: s.color }} />
+                {s.label}
+              </span>
+            ))}
+            <span className="flex items-center gap-1">
+              <span className="w-2.5 h-2.5 rounded-sm inline-block bg-slate-600" />
+              Open
+            </span>
+          </div>
+          {zipStats.length > TOP && (
+            <button
+              onClick={e => { e.stopPropagation(); setShowAll(a => !a) }}
+              className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition-colors shrink-0 ml-3"
+            >
+              {showAll
+                ? <><ChevronUp size={12} /> Show less</>
+                : <><ChevronDown size={12} /> All {zipStats.length}</>}
+            </button>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -330,7 +369,6 @@ function ActivityFeed({ entries, repNameMap, loadedAt }) {
 
   return (
     <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-      {/* Header — always visible, click to toggle */}
       <button
         onClick={() => setOpen(o => !o)}
         className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-800/50 transition-colors"
@@ -344,7 +382,6 @@ function ActivityFeed({ entries, repNameMap, loadedAt }) {
         </div>
       </button>
 
-      {/* Body — only when open */}
       {open && (
         <div className="px-5 pb-5">
           {entries.length === 0 ? (
@@ -379,22 +416,25 @@ function ActivityFeed({ entries, repNameMap, loadedAt }) {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function Dashboard() {
-  const [stats,    setStats]    = useState(null)
-  const [activity, setActivity] = useState([])
-  const [loading,  setLoading]  = useState(true)
-  const [error,    setError]    = useState('')
-  const [loadedAt, setLoadedAt] = useState(0)
+  const [stats,        setStats]        = useState(null)
+  const [activity,     setActivity]     = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [error,        setError]        = useState('')
+  const [loadedAt,     setLoadedAt]     = useState(0)
+  const [repLocations, setRepLocations] = useState([])
 
   async function load() {
     setLoading(true)
     setError('')
     try {
-      const [statsRes, actRes] = await Promise.all([
+      const [statsRes, actRes, locRes] = await Promise.all([
         getDashboardStats(),
         getRecentActivity(25),
+        getRepLocations(),
       ])
       setStats(statsRes)
       setActivity(actRes.entries)
+      setRepLocations(locRes.locations || [])
       setLoadedAt(Date.now())
     } catch (err) {
       setError('Failed to load: ' + err.message)
@@ -408,6 +448,9 @@ export default function Dashboard() {
   const repNameMap = stats
     ? Object.fromEntries(stats.repStats.map(r => [r.id, r.name]))
     : {}
+
+  // Set of rep IDs currently online (have an active GPS ping)
+  const liveRepIds = new Set(repLocations.map(l => String(l.rep_id)))
 
   return (
     <div className="p-6 max-w-5xl mx-auto">
@@ -439,10 +482,8 @@ export default function Dashboard() {
       ) : stats ? (
         <div className="flex flex-col gap-6">
 
-          {/* Upcoming appointments */}
           <UpcomingAppointmentsCard />
 
-          {/* Market overview */}
           <MarketOverviewCard totals={stats.totals} />
 
           {/* Rep cards */}
@@ -452,17 +493,19 @@ export default function Dashboard() {
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {stats.repStats.map(rep => (
-                <RepCard key={rep.id} rep={rep} />
+                <RepCard
+                  key={rep.id}
+                  rep={rep}
+                  isOnline={liveRepIds.has(String(rep.id))}
+                />
               ))}
             </div>
           </div>
 
-          {/* ZIP leaderboard */}
           {stats.zipStats?.length > 0 && (
             <ZipLeaderboardCard zipStats={stats.zipStats} />
           )}
 
-          {/* Activity feed */}
           <ActivityFeed entries={activity} repNameMap={repNameMap} loadedAt={loadedAt} />
 
         </div>
