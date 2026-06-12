@@ -718,6 +718,7 @@ export default function MapPage() {
 
   function patchLead(leadId, patch) {
     setAllLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...patch } : l))
+    setGeoLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...patch } : l))
     setSelectedLead(prev => prev?.id === leadId ? { ...prev, ...patch } : prev)
     setSelectedLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...patch } : l))
   }
@@ -739,20 +740,28 @@ export default function MapPage() {
     setSelectedLeads(sel)
     if (!geometry) return
     setGeoLeads([]); setGeoAnchor(null); setGeoLoading(true)
+
+    const selIds = new Set(sel.map(l => l.id))
+
+    function onGeoResult(leads) {
+      setGeoLeads(leads)
+      // Merge geo-revealed leads into selectedLeads so the assign panel has the full picture
+      const newOnes = leads.filter(l => !selIds.has(l.id))
+      if (newOnes.length) setSelectedLeads(prev => [...prev, ...newOnes])
+    }
+
     if (geometry.type === 'radius') {
       const miles = geometry.radiusM / 1609.34
       setGeoAnchor({ lat: geometry.center.lat, lng: geometry.center.lng, radiusM: geometry.radiusM })
       getLeadsNearPin(geometry.center.lat, geometry.center.lng, miles)
-        .then(r => setGeoLeads((r.leads || []).filter(l => l.lat && l.lng)))
+        .then(r => onGeoResult((r.leads || []).filter(l => l.lat && l.lng)))
         .catch(() => {})
         .finally(() => setGeoLoading(false))
     } else {
       const lats = geometry.poly.map(p => p[0])
       const lngs = geometry.poly.map(p => p[1])
       getLeadsInBounds(Math.min(...lats), Math.max(...lats), Math.min(...lngs), Math.max(...lngs))
-        .then(r => {
-          setGeoLeads((r.leads || []).filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], geometry.poly)))
-        })
+        .then(r => onGeoResult((r.leads || []).filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], geometry.poly))))
         .catch(() => {})
         .finally(() => setGeoLoading(false))
     }
@@ -784,7 +793,13 @@ export default function MapPage() {
     await Promise.allSettled(targets.map(async lead => {
       try {
         await assignLead(lead.id, rep.id, rep.name, lead.zip)
-        patchLead(lead.id, { assigned_rep: rep.name, assigned_rep_id: rep.id })
+        const patch = { assigned_rep: rep.name, assigned_rep_id: rep.id }
+        // If this was a geo-revealed unassigned lead, add it to allLeads
+        setAllLeads(prev => {
+          if (prev.some(l => l.id === lead.id)) return prev.map(l => l.id === lead.id ? { ...l, ...patch } : l)
+          return [...prev, { ...lead, ...patch }]
+        })
+        patchLead(lead.id, patch)
         ok++
       } finally {
         done++
