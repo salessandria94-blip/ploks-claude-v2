@@ -445,9 +445,12 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
 
 // ── Rep filter menu ───────────────────────────────────────────────────────────
 
-function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations }) {
+const ALL_STATUSES = ['no contact', 'contacted', 'working', 'follow up', 'closed']
+
+function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations, statusFilter, onStatusToggle }) {
   const ref = useRef(null)
   const activeRepIds = new Set((repLocations || []).map(l => l.rep_id))
+  const allStatusesOn = statusFilter.size === ALL_STATUSES.length
 
   useEffect(() => {
     if (!open) return
@@ -456,27 +459,73 @@ function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations }) {
     return () => document.removeEventListener('mousedown', handler)
   }, [open, onToggle])
 
+  const isActive = open || repFilter || !allStatusesOn
+
   return (
     <div ref={ref} className="absolute top-3 left-3 z-[999]">
       <button
         onClick={onToggle}
-        title="Filter by rep"
+        title="Leads & rep filters"
         className={`flex items-center gap-2 px-3 py-2 rounded-lg border shadow-lg text-sm font-medium transition-colors ${
-          open || repFilter
+          isActive
             ? 'bg-blue-600 border-blue-500 text-white'
             : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'
         }`}
       >
         <Menu size={15} />
         {repFilter ? repFilter.name : 'All Reps'}
-        {/* Show live indicator on button when filtered rep is online */}
         {repFilter && activeRepIds.has(repFilter.id) && (
           <Navigation size={12} className="text-green-400 fill-green-400" />
+        )}
+        {!allStatusesOn && (
+          <span className="ml-0.5 bg-white/20 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+            {statusFilter.size}
+          </span>
         )}
       </button>
 
       {open && (
-        <div className="absolute top-11 left-0 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 min-w-56 max-h-80 overflow-y-auto">
+        <div className="absolute top-11 left-0 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 min-w-60 max-h-[80vh] overflow-y-auto">
+
+          {/* ── All Leads section ── */}
+          <div className="px-2 pt-1 pb-0.5 flex items-center justify-between">
+            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">All Leads</span>
+            {!allStatusesOn && (
+              <button
+                onClick={() => ALL_STATUSES.forEach(s => !statusFilter.has(s) && onStatusToggle(s))}
+                className="text-[10px] text-blue-400 hover:text-blue-300"
+              >
+                Show all
+              </button>
+            )}
+          </div>
+          {STATUS_LEGEND.map(([label, color]) => {
+            const key = label.toLowerCase()
+            const on = statusFilter.has(key)
+            return (
+              <button
+                key={key}
+                onClick={() => onStatusToggle(key)}
+                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  on ? 'text-slate-200 hover:bg-slate-800' : 'text-slate-600 hover:bg-slate-800'
+                }`}
+              >
+                <span
+                  className="w-3 h-3 rounded-full shrink-0 transition-opacity"
+                  style={{ background: color, opacity: on ? 1 : 0.25 }}
+                />
+                {label}
+                {on && <span className="ml-auto text-slate-600 text-xs">✓</span>}
+              </button>
+            )
+          })}
+
+          <div className="border-t border-slate-700/50 my-1.5" />
+
+          {/* ── All Reps section ── */}
+          <div className="px-2 pb-0.5">
+            <span className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider">All Reps</span>
+          </div>
           <button
             onClick={() => { onSelect(null); onToggle() }}
             className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5 ${
@@ -522,6 +571,7 @@ export default function MapPage() {
   const [allLeads, setAllLeads]     = useState([])   // all assigned leads, lat/lng filtered
   const [repFilter, setRepFilter]   = useState(null) // null = All Reps
   const [zipFilter, setZipFilter]   = useState('')   // '' = all ZIPs
+  const [statusFilter, setStatusFilter] = useState(() => new Set(ALL_STATUSES))
   const [loading, setLoading]       = useState(true)
   const [repLocations, setRepLocations] = useState([]) // live rep GPS dots
   const [repFlyTarget, setRepFlyTarget] = useState(null) // snap map to live rep
@@ -572,13 +622,29 @@ export default function MapPage() {
     return Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0]))
   }, [allLeads, repFilter])
 
-  // Displayed leads = rep filter + zip filter, both client-side
+  function toggleStatus(key) {
+    setStatusFilter(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) {
+        if (next.size === 1) return next  // keep at least one visible
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
+
+  // Displayed leads = rep filter + zip filter + status filter, all client-side
   const filteredLeads = useMemo(() => {
     let out = allLeads
     if (repFilter) out = out.filter(l => String(l.assigned_rep_id) === String(repFilter.id))
     if (zipFilter) out = out.filter(l => l.zip === zipFilter)
+    if (statusFilter.size < ALL_STATUSES.length) {
+      out = out.filter(l => statusFilter.has((l.status || 'no contact').toLowerCase()))
+    }
     return out
-  }, [allLeads, repFilter, zipFilter])
+  }, [allLeads, repFilter, zipFilter, statusFilter])
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
 
@@ -752,6 +818,8 @@ export default function MapPage() {
           open={menuOpen}
           onToggle={() => setMenuOpen(o => !o)}
           repLocations={repLocations}
+          statusFilter={statusFilter}
+          onStatusToggle={toggleStatus}
         />
 
         {/* Lasso / radius tools (top-right) */}
