@@ -448,8 +448,6 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
 function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations }) {
   const ref = useRef(null)
   const activeRepIds = new Set((repLocations || []).map(l => l.rep_id))
-  const [leadsOpen, setLeadsOpen] = useState(true)
-  const [repsOpen,  setRepsOpen]  = useState(true)
 
   useEffect(() => {
     if (!open) return
@@ -462,7 +460,7 @@ function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations }) {
     <div ref={ref} className="absolute top-3 left-3 z-[999]">
       <button
         onClick={onToggle}
-        title="Map layers & reps"
+        title="Filter by rep"
         className={`flex items-center gap-2 px-3 py-2 rounded-lg border shadow-lg text-sm font-medium transition-colors ${
           open || repFilter
             ? 'bg-blue-600 border-blue-500 text-white'
@@ -471,72 +469,46 @@ function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations }) {
       >
         <Menu size={15} />
         {repFilter ? repFilter.name : 'All Reps'}
+        {/* Show live indicator on button when filtered rep is online */}
         {repFilter && activeRepIds.has(repFilter.id) && (
           <Navigation size={12} className="text-green-400 fill-green-400" />
         )}
       </button>
 
       {open && (
-        <div className="absolute top-11 left-0 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl overflow-hidden min-w-56">
-          {/* ── All Leads section ── */}
+        <div className="absolute top-11 left-0 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-1.5 min-w-56 max-h-80 overflow-y-auto">
           <button
-            onClick={() => setLeadsOpen(v => !v)}
-            className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800"
+            onClick={() => { onSelect(null); onToggle() }}
+            className={`w-full text-left px-3 py-2 rounded-lg text-sm font-medium transition-colors mb-0.5 ${
+              !repFilter ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+            }`}
           >
-            <span>All Leads</span>
-            <ChevronDown size={13} className={`transition-transform duration-150 ${leadsOpen ? 'rotate-180' : ''}`} />
+            All Reps
           </button>
-          {leadsOpen && STATUS_LEGEND.map(([label, color]) => (
-            <div key={label} className="flex items-center gap-2.5 pl-6 pr-3 py-1.5 text-sm text-slate-400">
-              <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
-              {label}
-            </div>
-          ))}
-
-          {/* ── All Reps section ── */}
-          <div className="border-t border-slate-700/50" />
-          <button
-            onClick={() => setRepsOpen(v => !v)}
-            className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800"
-          >
-            <span>All Reps</span>
-            <ChevronDown size={13} className={`transition-transform duration-150 ${repsOpen ? 'rotate-180' : ''}`} />
-          </button>
-          {repsOpen && (
-            <div className="max-h-64 overflow-y-auto">
+          <div className="border-t border-slate-700/50 my-1" />
+          {reps.map(rep => {
+            const isLive = activeRepIds.has(rep.id)
+            return (
               <button
-                onClick={() => { onSelect(null); onToggle() }}
-                className={`w-full text-left pl-6 pr-3 py-2 text-sm font-medium transition-colors ${
-                  !repFilter ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
+                key={rep.id}
+                onClick={() => { onSelect(rep); onToggle() }}
+                className={`w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
+                  repFilter?.id === rep.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
                 }`}
               >
-                All Reps
+                <span>{rep.name}</span>
+                {isLive && (
+                  <span className="flex items-center gap-1 shrink-0">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
+                    </span>
+                    <Navigation size={11} className={repFilter?.id === rep.id ? 'text-white fill-white' : 'text-green-400 fill-green-400'} />
+                  </span>
+                )}
               </button>
-              {reps.map(rep => {
-                const isLive = activeRepIds.has(rep.id)
-                return (
-                  <button
-                    key={rep.id}
-                    onClick={() => { onSelect(rep); onToggle() }}
-                    className={`w-full flex items-center justify-between gap-2 pl-6 pr-3 py-2 text-sm transition-colors ${
-                      repFilter?.id === rep.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <span>{rep.name}</span>
-                    {isLive && (
-                      <span className="flex items-center gap-1 shrink-0">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
-                        </span>
-                        <Navigation size={11} className={repFilter?.id === rep.id ? 'text-white fill-white' : 'text-green-400 fill-green-400'} />
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          )}
+            )
+          })}
         </div>
       )}
     </div>

@@ -10,10 +10,10 @@ import {
   validatePin, getAllReps, getZipList, getAllLeads, getLeadsForRep, claimLead, unassignLead,
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
   claimLeadsBulk, unassignLeadsBulk, getLeadsNearPin, getLeadsInBounds,
-  createAppointment, getAppointmentsForRep, deleteAppointment, pingRepLocation, getRepLocations,
+  createAppointment, getAppointmentsForRep, deleteAppointment, pingRepLocation,
 } from '../api/sheets.js'
 import AdminDashboard from './Dashboard.jsx'
-import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, ChevronDown, Plus, Trash2 } from 'lucide-react'
+import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 const STORE_KEY = 'ploks_rep_v2'
@@ -170,17 +170,6 @@ function RepLogin({ lockedSlug, onUnlock }) {
 
 // ── Map tab ─────────────────────────────────────────────────────────────────
 
-// Sky-blue rep dot with initials (mirrors the admin map)
-function repLocIcon(name) {
-  const initials = (name || '?').split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
-  return L.divIcon({
-    className: '',
-    html: `<div style="background:#0ea5e9;color:white;border:2.5px solid white;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;box-shadow:0 0 0 3px rgba(14,165,233,0.35),0 2px 8px rgba(0,0,0,0.7);">${initials}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
-  })
-}
-
 // Keep the Leaflet canvas correctly sized when the tab is shown or the
 // bottom profile panel opens/closes.
 function MapResizer({ active }) {
@@ -218,23 +207,9 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   const watchRef = useRef(null)
   const snappedRef = useRef(false)
   const lastPingRef = useRef(0)   // timestamp of last successful location ping
-  const [repLocations, setRepLocations] = useState([])
-  const [leadsOpen, setLeadsOpen] = useState(true)
-  const [repsOpen,  setRepsOpen]  = useState(true)
 
   useEffect(() => { getZipList().then(r => setZips(r.zips || [])).catch(() => {}) }, [])
   useEffect(() => { getAllReps().then(r => setReps(r.reps || [])).catch(() => {}) }, [])
-
-  // Poll other reps' GPS locations every 60 s (dots hide after 5 min stale)
-  useEffect(() => {
-    async function poll() {
-      try { const r = await getRepLocations(); setRepLocations(r.locations || []) }
-      catch { /* silent */ }
-    }
-    poll()
-    const id = setInterval(poll, 60000)
-    return () => clearInterval(id)
-  }, [])
 
   function startGps() {
     if (!navigator.geolocation) { setGpsErr('Location not supported on this device'); return }
@@ -482,13 +457,6 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
               pathOptions={{ color: '#7c3aed', weight: 1.5, fillColor: '#7c3aed', fillOpacity: 0.06 }} />
           )}
           {repPos && <Marker position={repPos} icon={repLocationIcon} zIndexOffset={2000} />}
-          {/* Other reps' live GPS dots */}
-          {repLocations.map(loc => {
-            const r = reps.find(r => r.id === loc.rep_id)
-            return r ? (
-              <Marker key={loc.rep_id} position={[loc.lat, loc.lng]} icon={repLocIcon(r.name)} zIndexOffset={1999} />
-            ) : null
-          })}
           {displayLeads.map(lead => {
             const rel = relationOf(lead, rep.id)
             const sel = selectedIds.has(lead.id) || (selectedLead && selectedLead.id === lead.id)
@@ -506,64 +474,22 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
           })}
         </MapContainer>
 
-        {/* Hamburger menu — All Leads / All Reps */}
+        {/* Hamburger menu — layer switcher */}
         <div className="absolute top-2 left-2 z-[1000]">
           <button
             onClick={() => setMenuOpen(v => !v)}
             className={`p-2 rounded-lg border shadow-lg ${menuOpen ? 'bg-slate-700 border-slate-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300'}`}
           ><Menu size={16} /></button>
           {menuOpen && (
-            <div className="mt-1 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl min-w-52">
-              {/* ── All Leads ── */}
-              <button
-                onClick={() => setLeadsOpen(v => !v)}
-                className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800"
-              >
-                <span>All Leads</span>
-                <ChevronDown size={13} className={`transition-transform duration-150 ${leadsOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {leadsOpen && LAYERS.map(layer => (
+            <div className="mt-1 bg-slate-900 border border-slate-700 rounded-xl overflow-hidden shadow-2xl min-w-44">
+              {LAYERS.map(layer => (
                 <button key={layer.id}
                   onClick={() => { setMapLayer(layer.id); setMenuOpen(false) }}
-                  className={`w-full text-left pl-6 pr-3 py-2 text-sm flex items-center gap-2.5 transition-colors ${mapLayer === layer.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
+                  className={`w-full text-left px-3 py-2.5 text-sm flex items-center gap-2.5 transition-colors ${mapLayer === layer.id ? 'bg-blue-600 text-white' : 'text-slate-300 hover:bg-slate-800'}`}>
                   <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: layer.color }} />
                   {layer.label}
                 </button>
               ))}
-              {/* ── All Reps ── */}
-              <div className="border-t border-slate-700/50" />
-              <button
-                onClick={() => setRepsOpen(v => !v)}
-                className="w-full flex items-center justify-between px-3 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-800"
-              >
-                <span>All Reps</span>
-                <ChevronDown size={13} className={`transition-transform duration-150 ${repsOpen ? 'rotate-180' : ''}`} />
-              </button>
-              {repsOpen && reps.map(rep => {
-                const loc = repLocations.find(l => l.rep_id === rep.id)
-                const isLive = !!loc
-                return (
-                  <button
-                    key={rep.id}
-                    onClick={() => {
-                      if (loc && mapRef.current) mapRef.current.flyTo([loc.lat, loc.lng], 14, { animate: true, duration: 1.5 })
-                      setMenuOpen(false)
-                    }}
-                    className="w-full flex items-center justify-between gap-2 pl-6 pr-3 py-2 text-sm text-slate-300 hover:bg-slate-800 transition-colors"
-                  >
-                    <span>{rep.name}</span>
-                    {isLive && (
-                      <span className="flex items-center gap-1 shrink-0">
-                        <span className="relative flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-green-400" />
-                        </span>
-                        <Navigation size={11} className="text-green-400 fill-green-400" />
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
             </div>
           )}
         </div>
