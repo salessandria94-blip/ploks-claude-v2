@@ -29,6 +29,7 @@ const STATUS_LEGEND = [
   ['Working',    '#a855f7'],
   ['Follow Up',  '#ef4444'],
   ['Closed',     '#6b7280'],
+  ['Unassigned', '#60a5fa'],
 ]
 
 function pinColor(lead, selected) {
@@ -445,7 +446,7 @@ function MultiSelectPanel({ leads, reps, bulkBusy, bulkProgress, onBulkAssign, o
 
 // ── Rep filter menu ───────────────────────────────────────────────────────────
 
-const ALL_STATUSES = ['no contact', 'contacted', 'working', 'follow up', 'closed']
+const ALL_STATUSES = ['no contact', 'contacted', 'working', 'follow up', 'closed', 'unassigned']
 
 function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations, statusFilter, onStatusToggle }) {
   const ref = useRef(null)
@@ -680,8 +681,10 @@ export default function MapPage() {
   const filteredIds = useMemo(() => new Set(filteredLeads.map(l => l.id)), [filteredLeads])
   const displayLeads = useMemo(() => [
     ...filteredLeads,
-    ...geoLeads.filter(l => !filteredIds.has(l.id) && l.lat && l.lng),
-  ], [filteredLeads, geoLeads, filteredIds])
+    ...(statusFilter.has('unassigned')
+      ? geoLeads.filter(l => !filteredIds.has(l.id) && l.lat && l.lng)
+      : []),
+  ], [filteredLeads, geoLeads, filteredIds, statusFilter])
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
 
