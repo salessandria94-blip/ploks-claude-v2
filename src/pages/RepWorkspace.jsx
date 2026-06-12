@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import {
@@ -17,7 +17,7 @@ import SalesManagerWorkspace from './SalesManagerWorkspace.jsx'
 import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
-const STORE_KEY = 'ploks_rep_v2'
+const STORE_KEY = 'ploks_rep_v3'
 const ACTION_LABELS = {
   admin_assign: 'Assigned', admin_unassign: 'Unassigned', status_update: 'Status changed',
   claim: 'Claimed', bulk_claim: 'Claimed', unassign: 'Unassigned', bulk_unassign: 'Released',
@@ -103,7 +103,7 @@ function RepLogin({ lockedSlug, onUnlock }) {
 
   useEffect(() => {
     if (lockedSlug) return
-    getAllReps().then(r => setReps(r.reps || [])).catch(() => setError('Could not load reps'))
+    getAllReps().then(r => setReps((r.reps || []).filter(r => !r.is_manager))).catch(() => setError('Could not load reps'))
   }, [lockedSlug])
 
   async function submit(nextPin) {
@@ -1561,6 +1561,7 @@ const TABS = [
 
 export default function RepWorkspace() {
   const { repSlug } = useParams()
+  const navigate = useNavigate()
   const [rep, setRep] = useState(() => {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || 'null') } catch { return null }
   })
@@ -1611,6 +1612,7 @@ export default function RepWorkspace() {
   function logout() {
     setRep(null)
     try { localStorage.removeItem(STORE_KEY) } catch { /* noop */ }
+    navigate('/field')
   }
 
   if (!rep) return <RepLogin lockedSlug={repSlug || ''} onUnlock={unlock} />
