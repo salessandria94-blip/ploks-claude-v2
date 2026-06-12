@@ -1,11 +1,11 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { MapContainer, TileLayer, Marker, Popup, useMap, useMapEvents } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import {
   getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity,
-  getAllAssignedLeads, getRepLocations, getZipList,
+  getAllAssignedLeads, getRepLocations, getZipList, getLeadsNearPin, getLeadsInBounds,
 } from '../api/sheets.js'
-import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation } from 'lucide-react'
+import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, LocateFixed } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
 
 const SATELLITE_TILE = {
@@ -33,9 +33,17 @@ const STATUS_LEGEND = [
 
 function pinColor(lead, selected) {
   if (selected) return SELECTED_COLOR
+  if (!lead.assigned_rep_id) return '#60a5fa'   // unassigned / geo-revealed = sky-blue
   const key = (lead.status || 'no contact').toLowerCase()
   return STATUS_COLORS[key] || STATUS_COLORS['no contact']
 }
+
+const MY_LOCATION_ICON = L.divIcon({
+  className: '',
+  html: `<div style="width:18px;height:18px;border-radius:50%;background:#2563eb;border:3px solid white;box-shadow:0 0 0 6px rgba(37,99,235,0.25)"></div>`,
+  iconSize: [18, 18],
+  iconAnchor: [9, 9],
+})
 
 function leadIcon(color, selected) {
   const size = selected ? 18 : 14
@@ -196,11 +204,11 @@ function DrawTool({ tool, leads, onSelect }) {
         const poly = points.map(p => [p.lat, p.lng])
         clearLayer()
         layer = L.polygon(poly, { color: '#22c55e', weight: 2, fillColor: '#22c55e', fillOpacity: 0.12 }).addTo(map)
-        onSelect(leads.filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], poly)))
+        onSelect(leads.filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], poly)), { type: 'lasso', poly })
       } else {
         const r = layer ? layer.getRadius() : 0
         if (r < 1) { clearLayer(); return }
-        onSelect(leads.filter(l => l.lat && l.lng && center.distanceTo(L.latLng(l.lat, l.lng)) <= r))
+        onSelect(leads.filter(l => l.lat && l.lng && center.distanceTo(L.latLng(l.lat, l.lng)) <= r), { type: 'radius', center, radiusM: r })
       }
     }
 
@@ -584,6 +592,14 @@ export default function MapPage() {
   const [allZips, setAllZips]       = useState([])
   const [error, setError]           = useState('')
   const [flyTarget, setFlyTarget]   = useState(null)
+  // Geo-search (lasso reveal)
+  const [geoLeads, setGeoLeads]     = useState([])
+  const [geoAnchor, setGeoAnchor]   = useState(null)
+  const [geoLoading, setGeoLoading] = useState(false)
+  // Own GPS
+  const [myLocation, setMyLocation] = useState(null)
+  const [gpsActive, setGpsActive]   = useState(false)
+  const gpsWatchRef = useRef(null)
 
   // On mount: load reps + all assigned leads + full ZIP list in parallel
   useEffect(() => {
@@ -638,6 +654,25 @@ export default function MapPage() {
     })
   }
 
+  // GPS toggle
+  function toggleGPS() {
+    if (gpsActive) {
+      if (gpsWatchRef.current != null) navigator.geolocation.clearWatch(gpsWatchRef.current)
+      gpsWatchRef.current = null
+      setGpsActive(false)
+      setMyLocation(null)
+    } else {
+      setGpsActive(true)
+      gpsWatchRef.current = navigator.geolocation.watchPosition(
+        pos => setMyLocation([pos.coords.latitude, pos.coords.longitude]),
+        () => { setGpsActive(false); setMyLocation(null) },
+        { enableHighAccuracy: true }
+      )
+    }
+  }
+
+  function clearGeo() { setGeoLeads([]); setGeoAnchor(null); setSelectedLeads([]) }
+
   // Displayed leads = rep filter + zip filter + status filter, all client-side
   const filteredLeads = useMemo(() => {
     let out = allLeads
@@ -648,6 +683,13 @@ export default function MapPage() {
     }
     return out
   }, [allLeads, repFilter, zipFilter, statusFilter])
+
+  // Merge assigned (filtered) leads with geo-search revealed leads
+  const filteredIds = useMemo(() => new Set(filteredLeads.map(l => l.id)), [filteredLeads])
+  const displayLeads = useMemo(() => [
+    ...filteredLeads,
+    ...geoLeads.filter(l => !filteredIds.has(l.id) && l.lat && l.lng),
+  ], [filteredLeads, geoLeads, filteredIds])
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
 
@@ -691,9 +733,28 @@ export default function MapPage() {
     setSelectedLead(lead)
   }
 
-  const handleAreaSelect = useCallback(sel => {
+  const handleAreaSelect = useCallback((sel, geometry) => {
     setSelectedLead(null)
     setSelectedLeads(sel)
+    if (!geometry) return
+    setGeoLeads([]); setGeoAnchor(null); setGeoLoading(true)
+    if (geometry.type === 'radius') {
+      const miles = geometry.radiusM / 1609.34
+      setGeoAnchor({ lat: geometry.center.lat, lng: geometry.center.lng, radiusM: geometry.radiusM })
+      getLeadsNearPin(geometry.center.lat, geometry.center.lng, miles)
+        .then(r => setGeoLeads((r.leads || []).filter(l => l.lat && l.lng)))
+        .catch(() => {})
+        .finally(() => setGeoLoading(false))
+    } else {
+      const lats = geometry.poly.map(p => p[0])
+      const lngs = geometry.poly.map(p => p[1])
+      getLeadsInBounds(Math.min(...lats), Math.max(...lats), Math.min(...lngs), Math.max(...lngs))
+        .then(r => {
+          setGeoLeads((r.leads || []).filter(l => l.lat && l.lng && pointInPolygon([l.lat, l.lng], geometry.poly)))
+        })
+        .catch(() => {})
+        .finally(() => setGeoLoading(false))
+    }
   }, [])
 
   async function handleAssign(lead, rep) {
@@ -778,7 +839,9 @@ export default function MapPage() {
 
         {!loading && (
           <span className="text-slate-500 text-xs shrink-0">
-            {filteredLeads.length} leads
+            {filteredLeads.length} assigned
+            {geoLeads.filter(l => !filteredIds.has(l.id)).length > 0 &&
+              <span className="text-sky-400"> +{geoLeads.filter(l => !filteredIds.has(l.id)).length} revealed</span>}
             {repFilter && <span className="text-blue-400"> · {repFilter.name}</span>}
             {zipFilter  && <span className="text-slate-600"> · ZIP {zipFilter}</span>}
           </span>
@@ -804,10 +867,19 @@ export default function MapPage() {
           <FitBounds leads={allLeads} />
           <CenterAndResize focusLead={selectedLead} panelOpen={panelOpen} />
           <ClickToClear enabled={!tool} onClear={clearSelection} />
-          <DrawTool tool={tool} leads={filteredLeads} onSelect={handleAreaSelect} />
+          <DrawTool tool={tool} leads={displayLeads} onSelect={handleAreaSelect} />
 
-          {/* Lead pins — colored by status */}
-          {filteredLeads.map(lead => {
+          {/* Radius reveal circle */}
+          {geoAnchor && (
+            <Circle center={[geoAnchor.lat, geoAnchor.lng]} radius={geoAnchor.radiusM}
+              pathOptions={{ color: '#60a5fa', weight: 1.5, fillColor: '#60a5fa', fillOpacity: 0.06 }} />
+          )}
+
+          {/* Own GPS location */}
+          {myLocation && <Marker position={myLocation} icon={MY_LOCATION_ICON} zIndexOffset={3000} />}
+
+          {/* Lead pins — colored by status; sky-blue for geo-revealed unassigned */}
+          {displayLeads.map(lead => {
             const isSel = selectedIds.has(lead.id) || (selectedLead?.id === lead.id)
             return (
               <Marker
@@ -876,36 +948,46 @@ export default function MapPage() {
           onStatusToggle={toggleStatus}
         />
 
-        {/* Lasso / radius tools (top-right) */}
+        {/* Tools (top-right) */}
         <div className="absolute top-3 right-3 z-[999] flex flex-col gap-2">
-          <button
-            onClick={() => setTool(t => (t === 'lasso' ? null : 'lasso'))}
-            title="Lasso select"
-            className={`p-2 rounded-lg border shadow-lg transition-colors ${
-              tool === 'lasso'
-                ? 'bg-green-600 border-green-500 text-white'
-                : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'
-            }`}
-          >
+          <button onClick={() => setTool(t => (t === 'lasso' ? null : 'lasso'))} title="Lasso reveal"
+            className={`p-2 rounded-lg border shadow-lg transition-colors ${tool === 'lasso' ? 'bg-sky-500 border-sky-400 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}>
             <Lasso size={16} />
           </button>
-          <button
-            onClick={() => setTool(t => (t === 'radius' ? null : 'radius'))}
-            title="Radius select"
-            className={`p-2 rounded-lg border shadow-lg transition-colors ${
-              tool === 'radius'
-                ? 'bg-green-600 border-green-500 text-white'
-                : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'
-            }`}
-          >
+          <button onClick={() => setTool(t => (t === 'radius' ? null : 'radius'))} title="Radius reveal"
+            className={`p-2 rounded-lg border shadow-lg transition-colors ${tool === 'radius' ? 'bg-sky-500 border-sky-400 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}>
             <Target size={16} />
           </button>
+          {(geoLeads.length > 0 || geoLoading) && (
+            <button onClick={clearGeo} title="Clear revealed leads"
+              className="p-2 rounded-lg border shadow-lg bg-sky-700 border-sky-600 text-white">
+              <X size={16} />
+            </button>
+          )}
+          <div className="border-t border-slate-700/50 my-0.5" />
+          <button onClick={toggleGPS} title={gpsActive ? 'Stop GPS' : 'Show my location'}
+            className={`p-2 rounded-lg border shadow-lg transition-colors ${gpsActive ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}>
+            <LocateFixed size={16} />
+          </button>
+          {myLocation && (
+            <button onClick={() => setFlyTarget(myLocation)} title="Center on my location"
+              className="p-2 rounded-lg border shadow-lg bg-slate-900/90 border-slate-700 text-blue-400 hover:text-blue-300">
+              <Navigation size={16} />
+            </button>
+          )}
         </div>
 
         {/* Draw hint */}
         {tool && (
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[999] bg-green-900/90 text-green-200 text-xs px-3 py-1.5 rounded-lg shadow-lg pointer-events-none">
-            {tool === 'lasso' ? 'Draw a loop around leads to select' : 'Drag out from a center point to select'}
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[999] bg-sky-900/90 text-sky-100 text-xs px-3 py-1.5 rounded-lg shadow-lg pointer-events-none">
+            {tool === 'lasso' ? 'Draw a loop to reveal leads' : 'Drag a circle to reveal leads'}
+          </div>
+        )}
+
+        {/* Geo-search loading */}
+        {geoLoading && (
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-[999] bg-sky-900/90 text-sky-100 text-xs px-3 py-1.5 rounded-lg shadow-lg flex items-center gap-2 pointer-events-none">
+            <Loader2 size={12} className="animate-spin" /> Revealing leads…
           </div>
         )}
 
