@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, useMap, useMapEvents } from 'react-lea
 import L from 'leaflet'
 import {
   getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity,
-  getAllAssignedLeads, getRepLocations,
+  getAllAssignedLeads, getRepLocations, getZipList,
 } from '../api/sheets.js'
 import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
@@ -19,7 +19,7 @@ const STATUS_COLORS = {
   'no contact': '#22c55e',
   'contacted':  '#f59e0b',
   'working':    '#a855f7',
-  'follow up':  '#f97316',
+  'follow up':  '#ef4444',
   'closed':     '#6b7280',
 }
 const SELECTED_COLOR = '#3b82f6'
@@ -27,7 +27,7 @@ const STATUS_LEGEND = [
   ['No Contact', '#22c55e'],
   ['Contacted',  '#f59e0b'],
   ['Working',    '#a855f7'],
-  ['Follow Up',  '#f97316'],
+  ['Follow Up',  '#ef4444'],
   ['Closed',     '#6b7280'],
 ]
 
@@ -581,16 +581,18 @@ export default function MapPage() {
   const [busy, setBusy]             = useState(null)
   const [bulkBusy, setBulkBusy]     = useState(false)
   const [bulkProgress, setBulkProgress] = useState([0, 0])
+  const [allZips, setAllZips]       = useState([])
   const [error, setError]           = useState('')
   const [flyTarget, setFlyTarget]   = useState(null)
 
-  // On mount: load reps + all assigned leads in parallel
+  // On mount: load reps + all assigned leads + full ZIP list in parallel
   useEffect(() => {
     async function init() {
       try {
-        const [repRes, leadRes] = await Promise.all([getAllReps(), getAllAssignedLeads()])
+        const [repRes, leadRes, zipRes] = await Promise.all([getAllReps(), getAllAssignedLeads(), getZipList()])
         setReps(repRes.reps || [])
         setAllLeads((leadRes.leads || []).filter(l => l.lat && l.lng))
+        setAllZips(zipRes.zips || [])
       } catch (err) {
         setError('Failed to load map data: ' + err.message)
       } finally {
@@ -611,15 +613,17 @@ export default function MapPage() {
     return () => clearInterval(id)
   }, [])
 
-  // ZIP options: derived from currently rep-filtered leads (count = leads in that ZIP)
+  // ZIP options: all ZIPs from DB, sorted by activity count desc then alphabetically
   const zipOptions = useMemo(() => {
     const source = repFilter
       ? allLeads.filter(l => String(l.assigned_rep_id) === String(repFilter.id))
       : allLeads
     const counts = {}
     source.forEach(l => { counts[l.zip] = (counts[l.zip] || 0) + 1 })
-    return Object.entries(counts).sort((a, b) => a[0].localeCompare(b[0]))
-  }, [allLeads, repFilter])
+    return allZips
+      .map(zip => [zip, counts[zip] || 0])
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  }, [allZips, allLeads, repFilter])
 
   function toggleStatus(key) {
     setStatusFilter(prev => {
@@ -728,22 +732,21 @@ export default function MapPage() {
       <div className="px-4 py-3 border-b border-slate-800 bg-slate-900 shrink-0 flex flex-wrap items-center gap-3">
         <h1 className="text-xl font-bold text-slate-100 shrink-0">Map</h1>
 
-        {/* ZIP dropdown — contextual to current rep filter */}
+        {/* ZIP dropdown — all ZIPs, sorted by activity desc */}
         <div className="relative min-w-40">
           <select
             value={zipFilter}
             onChange={e => { setZipFilter(e.target.value); setSelectedLead(null); setSelectedLeads([]) }}
-            disabled={loading || zipOptions.length === 0}
+            disabled={loading}
             className="w-full appearance-none bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 pr-8 focus:outline-none focus:border-blue-500 disabled:opacity-50"
           >
-            <option value="">
-              {loading ? 'Loading…' : zipOptions.length === 0 ? 'No ZIPs' : 'All ZIPs'}
-            </option>
+            <option value="">{loading ? 'Loading…' : 'ZIPs'}</option>
             {zipOptions.map(([zip, count]) => (
               <option key={zip} value={zip}>
-                {zip} ({count})
+                {count > 0 ? `${zip} (${count})` : zip}
               </option>
             ))}
+            <option value="">All ZIPs</option>
           </select>
           <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         </div>
@@ -853,25 +856,6 @@ export default function MapPage() {
             {tool === 'lasso' ? 'Draw a loop around leads to select' : 'Drag out from a center point to select'}
           </div>
         )}
-
-        {/* Status legend (bottom-left) */}
-        <div className="absolute bottom-4 left-3 z-[999] bg-slate-900/90 rounded-lg px-3 py-2 text-xs text-slate-300 space-y-1 pointer-events-none">
-          {STATUS_LEGEND.map(([label, color]) => (
-            <div key={label} className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full inline-block shrink-0" style={{ background: color }} />
-              {label}
-            </div>
-          ))}
-          {repLocations.length > 0 && (
-            <>
-              <div className="border-t border-slate-700/50 my-0.5" />
-              <div className="flex items-center gap-2">
-                <span className="w-3 h-3 rounded-full inline-block shrink-0" style={{ background: '#0ea5e9' }} />
-                Rep (live)
-              </div>
-            </>
-          )}
-        </div>
 
         {/* Empty / loading state */}
         {loading && (
