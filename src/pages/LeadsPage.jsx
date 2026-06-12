@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
-import { getAllLeads, getZipList, getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity } from '../api/sheets.js'
+import { getAllLeads, getZipList, getAdminZipStats, getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity } from '../api/sheets.js'
 import { RefreshCw, ChevronDown, MapPin, ChevronRight, ClipboardList } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
@@ -222,6 +222,7 @@ function AssignCell({ lead, reps, onAssign, onUnassign, assigning }) {
 
 export default function LeadsPage() {
   const [zips, setZips] = useState([])
+  const [zipCounts, setZipCounts] = useState({})
   const [reps, setReps] = useState([])
   const [selectedZip, setSelectedZip] = useState('')
   const [leads, setLeads] = useState([])
@@ -237,9 +238,10 @@ export default function LeadsPage() {
   useEffect(() => {
     async function loadMeta() {
       try {
-        const [zipRes, repRes] = await Promise.all([getZipList(), getAllReps()])
+        const [zipRes, repRes, countRes] = await Promise.all([getZipList(), getAllReps(), getAdminZipStats()])
         setZips(zipRes.zips || [])
         setReps(repRes.reps || [])
+        setZipCounts(countRes.counts || {})
       } catch (err) {
         setError('Failed to load: ' + err.message)
       } finally {
@@ -248,6 +250,13 @@ export default function LeadsPage() {
     }
     loadMeta()
   }, [])
+
+  // All ZIPs sorted by assigned-lead count desc, then alphabetically
+  const zipOptions = useMemo(() =>
+    [...zips]
+      .map(z => [z, zipCounts[z] || 0])
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  , [zips, zipCounts])
 
   async function loadLeads(zip) {
     if (!zip) return
@@ -339,8 +348,10 @@ export default function LeadsPage() {
           disabled={loadingMeta}
           className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 min-w-40"
         >
-          <option value="">{loadingMeta ? 'Loading ZIPs…' : 'Select a ZIP code'}</option>
-          {zips.map(z => <option key={z} value={z}>{z}</option>)}
+          <option value="">{loadingMeta ? 'Loading ZIPs…' : 'Select ZIP'}</option>
+          {zipOptions.map(([z, count]) => (
+            <option key={z} value={z}>{count > 0 ? `${z} (${count})` : z}</option>
+          ))}
         </select>
 
         {selectedZip && (
