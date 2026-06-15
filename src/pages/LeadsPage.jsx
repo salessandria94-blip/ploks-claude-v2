@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, Fragment } from 'react'
-import { getAllLeads, getZipList, getAdminZipStats, getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity } from '../api/sheets.js'
-import { RefreshCw, ChevronDown, MapPin, ChevronRight, ClipboardList } from 'lucide-react'
+import { getAllLeads, getLeadsForRep, getZipList, getAdminZipStats, getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity } from '../api/sheets.js'
+import { RefreshCw, ChevronDown, MapPin, ChevronRight, ClipboardList, Users } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
 
@@ -218,22 +218,101 @@ function AssignCell({ lead, reps, onAssign, onUnassign, assigning }) {
   )
 }
 
+// ── Shared lead table ──────────────────────────────────────────────────────
+
+function LeadTable({ leads, reps, expandedId, setExpandedId, assigning, onAssign, onUnassign, onLeadUpdate, showZip = false }) {
+  return (
+    <div className="rounded-xl border border-slate-800 overflow-hidden">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wide bg-slate-900">
+            <th className="text-left px-4 py-3 w-6"></th>
+            <th className="text-left px-4 py-3">Address</th>
+            {showZip && <th className="text-left px-4 py-3">ZIP</th>}
+            <th className="text-left px-4 py-3">Bucket</th>
+            <th className="text-left px-4 py-3">Status</th>
+            <th className="text-left px-4 py-3">Assigned To</th>
+          </tr>
+        </thead>
+        <tbody>
+          {leads.map(lead => {
+            const isExpanded = expandedId === lead.id
+            return (
+              <Fragment key={lead.id}>
+                <tr
+                  onClick={() => setExpandedId(isExpanded ? null : lead.id)}
+                  className={`border-b border-slate-800/60 cursor-pointer select-none transition-colors ${isExpanded ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'}`}
+                >
+                  <td className="px-4 py-3 text-slate-600">
+                    <ChevronRight size={14} className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="text-slate-100 font-medium">{lead.address || '—'}</div>
+                    {lead.owner_name && <div className="text-slate-500 text-xs mt-0.5">{lead.owner_name}</div>}
+                  </td>
+                  {showZip && (
+                    <td className="px-4 py-3 text-slate-400 text-xs font-mono">{lead.zip || '—'}</td>
+                  )}
+                  <td className={`px-4 py-3 text-xs font-medium ${bucketColor(lead.bucket)}`}>
+                    {lead.bucket || '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    {lead.status
+                      ? <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(lead.status)}`}>{lead.status}</span>
+                      : <span className="text-slate-600 text-xs">—</span>
+                    }
+                  </td>
+                  <td className="px-4 py-3">
+                    <AssignCell
+                      lead={lead}
+                      reps={reps}
+                      onAssign={onAssign}
+                      onUnassign={onUnassign}
+                      assigning={assigning === lead.id}
+                    />
+                  </td>
+                </tr>
+                {isExpanded && (
+                  <LeadProfile
+                    lead={lead}
+                    reps={reps}
+                    onClose={() => setExpandedId(null)}
+                    onLeadUpdate={onLeadUpdate}
+                  />
+                )}
+              </Fragment>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function LeadsPage() {
+  const [activeTab, setActiveTab] = useState('zip') // 'zip' | 'reps'
+
+  // Shared
   const [zips, setZips] = useState([])
   const [zipCounts, setZipCounts] = useState({})
   const [reps, setReps] = useState([])
-  const [selectedZip, setSelectedZip] = useState('')
   const [leads, setLeads] = useState([])
   const [loading, setLoading] = useState(false)
   const [loadingMeta, setLoadingMeta] = useState(true)
   const [error, setError] = useState('')
   const [filterStatus, setFilterStatus] = useState('')
-  const [filterRep, setFilterRep] = useState('')
   const [search, setSearch] = useState('')
   const [expandedId, setExpandedId] = useState(null)
   const [assigning, setAssigning] = useState(null)
+
+  // ZIP tab
+  const [selectedZip, setSelectedZip] = useState('')
+  const [filterRep, setFilterRep] = useState('')
+
+  // Reps tab
+  const [selectedRepId, setSelectedRepId] = useState('')
 
   useEffect(() => {
     async function loadMeta() {
@@ -258,40 +337,61 @@ export default function LeadsPage() {
       .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
   , [zips, zipCounts])
 
+  function resetFilters() {
+    setSearch(''); setFilterStatus(''); setFilterRep(''); setExpandedId(null)
+  }
+
   async function loadLeads(zip) {
     if (!zip) return
-    setLoading(true)
-    setError('')
-    setLeads([])
-    setExpandedId(null)
+    setLoading(true); setError(''); setLeads([]); setExpandedId(null)
     try {
       const res = await getAllLeads(zip)
       setLeads(res.leads || [])
     } catch (err) {
       setError('Failed to load leads: ' + err.message)
-    } finally {
-      setLoading(false)
-    }
+    } finally { setLoading(false) }
+  }
+
+  async function loadRepLeads(repId) {
+    if (!repId) return
+    setLoading(true); setError(''); setLeads([]); setExpandedId(null)
+    try {
+      const res = await getLeadsForRep(repId)
+      setLeads(res.leads || [])
+    } catch (err) {
+      setError('Failed to load leads: ' + err.message)
+    } finally { setLoading(false) }
   }
 
   function handleZipChange(zip) {
-    setSelectedZip(zip)
-    setSearch('')
-    setFilterRep('')
-    setFilterStatus('')
+    setSelectedZip(zip); resetFilters()
     loadLeads(zip)
+  }
+
+  function handleRepChange(repId) {
+    setSelectedRepId(repId); resetFilters()
+    loadRepLeads(repId)
+  }
+
+  function handleTabSwitch(tab) {
+    setActiveTab(tab)
+    setLeads([]); setError(''); resetFilters()
+    if (tab === 'zip') { setSelectedRepId('') }
+    if (tab === 'reps') { setSelectedZip('') }
   }
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase()
     return leads.filter(l => {
       if (filterStatus && l.status !== filterStatus) return false
-      if (filterRep === '__unassigned' && l.assigned_rep_id) return false
-      if (filterRep && filterRep !== '__unassigned' && l.assigned_rep_id !== filterRep) return false
+      if (activeTab === 'zip') {
+        if (filterRep === '__unassigned' && l.assigned_rep_id) return false
+        if (filterRep && filterRep !== '__unassigned' && l.assigned_rep_id !== filterRep) return false
+      }
       if (q && !l.address.toLowerCase().includes(q) && !(l.owner_name || '').toLowerCase().includes(q)) return false
       return true
     })
-  }, [leads, filterStatus, filterRep, search])
+  }, [leads, filterStatus, filterRep, search, activeTab])
 
   async function handleAssign(lead, rep) {
     setAssigning(lead.id)
@@ -302,9 +402,7 @@ export default function LeadsPage() {
       ))
     } catch (err) {
       alert('Assign failed: ' + err.message)
-    } finally {
-      setAssigning(null)
-    }
+    } finally { setAssigning(null) }
   }
 
   async function handleUnassign(lead) {
@@ -316,45 +414,83 @@ export default function LeadsPage() {
       ))
     } catch (err) {
       alert('Unassign failed: ' + err.message)
-    } finally {
-      setAssigning(null)
-    }
+    } finally { setAssigning(null) }
   }
 
   function handleLeadUpdate(leadId, fields) {
     setLeads(prev => prev.map(l => l.id === leadId ? { ...l, ...fields } : l))
   }
 
+  const selectedRep = reps.find(r => r.id === selectedRepId)
+  const refreshActive = activeTab === 'zip' ? () => loadLeads(selectedZip) : () => loadRepLeads(selectedRepId)
+  const hasSelection = activeTab === 'zip' ? !!selectedZip : !!selectedRepId
+
   return (
     <div className="p-6">
+      {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Leads</h1>
-          {selectedZip && !loading && (
-            <p className="text-slate-400 text-sm mt-0.5">{filtered.length} of {leads.length} leads in ZIP {selectedZip}</p>
+          {hasSelection && !loading && (
+            <p className="text-slate-400 text-sm mt-0.5">
+              {filtered.length} of {leads.length} leads
+              {activeTab === 'zip' && selectedZip ? ` in ZIP ${selectedZip}` : ''}
+              {activeTab === 'reps' && selectedRep ? ` for ${selectedRep.name}` : ''}
+            </p>
           )}
         </div>
-        {selectedZip && (
-          <button onClick={() => loadLeads(selectedZip)} disabled={loading} className="text-slate-400 hover:text-slate-200">
+        {hasSelection && (
+          <button onClick={refreshActive} disabled={loading} className="text-slate-400 hover:text-slate-200">
             <RefreshCw size={16} className={loading ? 'animate-spin text-blue-400' : ''} />
           </button>
         )}
       </div>
 
-      <div className="flex flex-wrap gap-3 mb-5">
-        <select
-          value={selectedZip}
-          onChange={e => handleZipChange(e.target.value)}
-          disabled={loadingMeta}
-          className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 min-w-40"
+      {/* Tab switcher */}
+      <div className="flex gap-1 mb-5 bg-slate-800 p-1 rounded-xl w-fit">
+        <button
+          onClick={() => handleTabSwitch('zip')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'zip' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
         >
-          <option value="">{loadingMeta ? 'Loading ZIPs…' : 'Select ZIP'}</option>
-          {zipOptions.map(([z, count]) => (
-            <option key={z} value={z}>{count > 0 ? `${z} (${count})` : z}</option>
-          ))}
-        </select>
+          <MapPin size={14} /> ZIP
+        </button>
+        <button
+          onClick={() => handleTabSwitch('reps')}
+          className={`flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'reps' ? 'bg-slate-700 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
+        >
+          <Users size={14} /> Reps
+        </button>
+      </div>
 
-        {selectedZip && (
+      {/* Controls */}
+      <div className="flex flex-wrap gap-3 mb-5">
+        {activeTab === 'zip' && (
+          <select
+            value={selectedZip}
+            onChange={e => handleZipChange(e.target.value)}
+            disabled={loadingMeta}
+            className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 min-w-40"
+          >
+            <option value="">{loadingMeta ? 'Loading ZIPs…' : 'Select ZIP'}</option>
+            {zipOptions.map(([z, count]) => (
+              <option key={z} value={z}>{count > 0 ? `${z} (${count})` : z}</option>
+            ))}
+          </select>
+        )}
+
+        {activeTab === 'reps' && (
+          <select
+            value={selectedRepId}
+            onChange={e => handleRepChange(e.target.value)}
+            disabled={loadingMeta}
+            className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 min-w-48"
+          >
+            <option value="">{loadingMeta ? 'Loading reps…' : 'Select a rep…'}</option>
+            {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+          </select>
+        )}
+
+        {hasSelection && (
           <>
             <input
               value={search}
@@ -370,96 +506,61 @@ export default function LeadsPage() {
               <option value="">All Statuses</option>
               {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            <select
-              value={filterRep}
-              onChange={e => setFilterRep(e.target.value)}
-              className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
-            >
-              <option value="">All Reps</option>
-              <option value="__unassigned">Unassigned</option>
-              {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-            </select>
+            {activeTab === 'zip' && (
+              <select
+                value={filterRep}
+                onChange={e => setFilterRep(e.target.value)}
+                className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+              >
+                <option value="">All Reps</option>
+                <option value="__unassigned">Unassigned</option>
+                {reps.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            )}
           </>
         )}
       </div>
 
       {error && <div className="text-red-400 text-sm mb-4">{error}</div>}
 
-      {!selectedZip && !loadingMeta && (
+      {/* Empty states */}
+      {!hasSelection && !loadingMeta && activeTab === 'zip' && (
         <div className="flex flex-col items-center justify-center py-24 text-center">
           <MapPin size={32} className="text-slate-600 mb-3" />
           <div className="text-slate-400 text-sm font-medium">Select a ZIP code to load leads</div>
           <div className="text-slate-600 text-xs mt-1">{zips.length} territories available</div>
         </div>
       )}
+      {!hasSelection && !loadingMeta && activeTab === 'reps' && (
+        <div className="flex flex-col items-center justify-center py-24 text-center">
+          <Users size={32} className="text-slate-600 mb-3" />
+          <div className="text-slate-400 text-sm font-medium">Select a rep to view their leads</div>
+          <div className="text-slate-600 text-xs mt-1">{reps.length} reps active</div>
+        </div>
+      )}
 
-      {loading && <div className="text-slate-400 text-sm">Loading leads for ZIP {selectedZip}…</div>}
+      {loading && (
+        <div className="text-slate-400 text-sm">
+          Loading leads{activeTab === 'zip' ? ` for ZIP ${selectedZip}` : selectedRep ? ` for ${selectedRep.name}` : ''}…
+        </div>
+      )}
 
-      {!loading && selectedZip && filtered.length === 0 && (
+      {!loading && hasSelection && filtered.length === 0 && (
         <div className="text-slate-500 text-sm">No leads match the current filters.</div>
       )}
 
       {!loading && filtered.length > 0 && (
-        <div className="rounded-xl border border-slate-800 overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wide bg-slate-900">
-                <th className="text-left px-4 py-3 w-6"></th>
-                <th className="text-left px-4 py-3">Address</th>
-                <th className="text-left px-4 py-3">Bucket</th>
-                <th className="text-left px-4 py-3">Status</th>
-                <th className="text-left px-4 py-3">Assigned To</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(lead => {
-                const isExpanded = expandedId === lead.id
-                return (
-                  <Fragment key={lead.id}>
-                    <tr
-                      onClick={() => setExpandedId(isExpanded ? null : lead.id)}
-                      className={`border-b border-slate-800/60 cursor-pointer select-none transition-colors ${isExpanded ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'}`}
-                    >
-                      <td className="px-4 py-3 text-slate-600">
-                        <ChevronRight size={14} className={`transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="text-slate-100 font-medium">{lead.address || '—'}</div>
-                        {lead.owner_name && <div className="text-slate-500 text-xs mt-0.5">{lead.owner_name}</div>}
-                      </td>
-                      <td className={`px-4 py-3 text-xs font-medium ${bucketColor(lead.bucket)}`}>
-                        {lead.bucket || '—'}
-                      </td>
-                      <td className="px-4 py-3">
-                        {lead.status
-                          ? <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${statusColor(lead.status)}`}>{lead.status}</span>
-                          : <span className="text-slate-600 text-xs">—</span>
-                        }
-                      </td>
-                      <td className="px-4 py-3">
-                        <AssignCell
-                          lead={lead}
-                          reps={reps}
-                          onAssign={handleAssign}
-                          onUnassign={handleUnassign}
-                          assigning={assigning === lead.id}
-                        />
-                      </td>
-                    </tr>
-                    {isExpanded && (
-                      <LeadProfile
-                        lead={lead}
-                        reps={reps}
-                        onClose={() => setExpandedId(null)}
-                        onLeadUpdate={handleLeadUpdate}
-                      />
-                    )}
-                  </Fragment>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <LeadTable
+          leads={filtered}
+          reps={reps}
+          expandedId={expandedId}
+          setExpandedId={setExpandedId}
+          assigning={assigning}
+          onAssign={handleAssign}
+          onUnassign={handleUnassign}
+          onLeadUpdate={handleLeadUpdate}
+          showZip={activeTab === 'reps'}
+        />
       )}
     </div>
   )
