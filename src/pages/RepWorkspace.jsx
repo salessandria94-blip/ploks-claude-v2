@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
 import {
@@ -99,6 +99,7 @@ function RepLogin({ lockedSlug, onUnlock }) {
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const navigate = useNavigate()
 
   useEffect(() => {
     if (lockedSlug) return
@@ -107,6 +108,12 @@ function RepLogin({ lockedSlug, onUnlock }) {
 
   async function submit(nextPin) {
     if (!slug) { setError('Pick your name first'); setPin(''); return }
+    // Admin shortcut — PIN 4321 navigates to admin dashboard
+    if (slug === '__admin__') {
+      if (nextPin === '4321') { navigate('/') }
+      else { setError('Wrong PIN'); setPin('') }
+      return
+    }
     setLoading(true)
     try {
       const res = await validatePin(slug, nextPin)
@@ -138,6 +145,8 @@ function RepLogin({ lockedSlug, onUnlock }) {
         >
           <option value="">Select your name…</option>
           {reps.map(r => <option key={r.id} value={r.slug}>{r.name}</option>)}
+          <option disabled>──────────────</option>
+          <option value="__admin__">Admin</option>
         </select>
       )}
       {lockedSlug && <div className="text-slate-300 text-sm">Welcome, {lockedSlug}</div>}
