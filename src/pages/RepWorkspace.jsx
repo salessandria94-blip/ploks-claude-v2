@@ -208,6 +208,9 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   const snappedRef = useRef(false)
   const lastPingRef = useRef(0)   // timestamp of last successful location ping
 
+  // ── Stephen-only test gate (remove gate when rolling to all reps) ───────────
+  const isStephen = rep?.name === 'Stephen Alessandria'
+
   useEffect(() => { getZipList().then(r => setZips(r.zips || [])).catch(() => {}) }, [])
   useEffect(() => { getAllReps().then(r => setReps(r.reps || [])).catch(() => {}) }, [])
 
@@ -288,6 +291,17 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
     } catch (err) {
       setError(err.message)
     } finally { setLoading(false) }
+  }
+
+  // Refresh: re-fetches leads for the current ZIP without resetting map view or state
+  async function refreshLeads() {
+    if (!selectedZip) return
+    setLoading(true); setError('')
+    try {
+      const res = await getAllLeads(selectedZip)
+      setLeads(res.leads || [])
+    } catch (err) { setError(err.message) }
+    finally { setLoading(false) }
   }
 
   function patchLead(id, patch) {
@@ -439,6 +453,15 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
             <span className="text-blue-400">{openCount}</span>/<span className="text-green-400">{mineCount}</span>
           </span>
         )}
+        {isStephen && selectedZip && !loading && (
+          <button
+            onClick={refreshLeads}
+            title="Refresh leads"
+            className="p-1.5 rounded-lg border border-slate-700 bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700 shrink-0 transition-colors"
+          >
+            <RefreshCw size={14} />
+          </button>
+        )}
       </div>
 
       {error && <div className="text-red-400 text-xs px-3 py-1.5 bg-red-950/30 shrink-0">{error}</div>}
@@ -526,8 +549,9 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
             )}
             {!geoLoading && !geoErr && geoLeadsSearch.length > 0 && (() => {
               const openGeo = geoLeadsSearch.filter(l => relationOf(l, rep.id) === 'open')
+              const mineGeo = isStephen ? geoLeadsSearch.filter(l => relationOf(l, rep.id) === 'mine') : []
               return (
-                <div className="pointer-events-auto">
+                <div className="pointer-events-auto flex gap-2">
                   {openGeo.length > 0 && (
                     <button
                       onClick={() => { bulkClaim(openGeo); clearGeoSearch() }}
@@ -535,6 +559,15 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
                       className="bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-xl shadow-lg text-sm"
                     >
                       {bulkBusy ? 'Claiming…' : `Claim ${openGeo.length}`}
+                    </button>
+                  )}
+                  {mineGeo.length > 0 && (
+                    <button
+                      onClick={() => { bulkRelease(mineGeo); clearGeoSearch() }}
+                      disabled={bulkBusy}
+                      className="bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white font-semibold px-4 py-2 rounded-xl shadow-lg text-sm"
+                    >
+                      {bulkBusy ? 'Releasing…' : `Release ${mineGeo.length}`}
                     </button>
                   )}
                 </div>
