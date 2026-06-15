@@ -180,6 +180,7 @@ export async function getAllAssignedLeads() {
     .from('leads')
     .select('*')
     .not('assigned_rep_id', 'is', null)
+    .limit(25000)   // Supabase default cap is 1000 — override to fetch all assigned leads
   if (error) throw new Error(error.message)
   return { leads: data || [] }
 }
