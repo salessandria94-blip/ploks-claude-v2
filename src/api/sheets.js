@@ -126,6 +126,7 @@ export async function getLeadsForRep(repId) {
     .from('leads')
     .select('*')
     .eq('assigned_rep_id', repId)
+    .limit(5000)   // a single rep won't exceed this; guards against PostgREST 1000-row default
   if (error) throw new Error(error.message)
   return { leads: data, repId, count: data.length }
 }
