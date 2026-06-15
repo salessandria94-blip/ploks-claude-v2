@@ -177,13 +177,23 @@ export async function getAdminZipStats() {
 }
 
 export async function getAllAssignedLeads() {
-  const { data, error } = await supabase
-    .from('leads')
-    .select('*')
-    .not('assigned_rep_id', 'is', null)
-    .limit(25000)   // Supabase default cap is 1000 — override to fetch all assigned leads
-  if (error) throw new Error(error.message)
-  return { leads: data || [] }
+  // Supabase PostgREST hard-caps at 1000 rows server-side regardless of .limit().
+  // Paginate in 1000-row pages until we have everything.
+  const PAGE = 1000
+  let all = []
+  let from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('leads')
+      .select('*')
+      .not('assigned_rep_id', 'is', null)
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    all = all.concat(data || [])
+    if (!data || data.length < PAGE) break   // last page
+    from += PAGE
+  }
+  return { leads: all }
 }
 
 export async function pingRepLocation(repId, lat, lng) {
