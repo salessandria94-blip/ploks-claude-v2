@@ -86,7 +86,7 @@ function LeadProfile({ lead, reps, onClose, onLeadUpdate }) {
 
   return (
     <tr>
-      <td colSpan={5} className="px-4 pb-4 pt-0 bg-slate-800/60 border-b border-slate-700">
+      <td colSpan={99} className="px-4 pb-4 pt-0 bg-slate-800/60 border-b border-slate-700">
         <div className="grid grid-cols-2 gap-3 mt-3 md:grid-cols-3">
           <Field label="Owner Name" value={form.owner_name} onChange={v => setForm(f => ({ ...f, owner_name: v }))} />
           <Field label="Phone"      value={form.phone}      onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="(000) 000-0000" />
@@ -222,14 +222,14 @@ function AssignCell({ lead, reps, onAssign, onUnassign, assigning }) {
 
 function LeadTable({ leads, reps, expandedId, setExpandedId, assigning, onAssign, onUnassign, onLeadUpdate, showZip = false }) {
   return (
-    <div className="rounded-xl border border-slate-800 overflow-hidden">
-      <table className="w-full text-sm">
+    <div className="rounded-xl border border-slate-800 overflow-hidden overflow-x-auto">
+      <table className="w-full text-sm min-w-[480px]">
         <thead>
           <tr className="border-b border-slate-800 text-slate-400 text-xs uppercase tracking-wide bg-slate-900">
             <th className="text-left px-4 py-3 w-6"></th>
             <th className="text-left px-4 py-3">Address</th>
             {showZip && <th className="text-left px-4 py-3">ZIP</th>}
-            <th className="text-left px-4 py-3">Bucket</th>
+            <th className="text-left px-4 py-3 hidden md:table-cell">Bucket</th>
             <th className="text-left px-4 py-3">Status</th>
             <th className="text-left px-4 py-3">Assigned To</th>
           </tr>
@@ -253,7 +253,7 @@ function LeadTable({ leads, reps, expandedId, setExpandedId, assigning, onAssign
                   {showZip && (
                     <td className="px-4 py-3 text-slate-400 text-xs font-mono">{lead.zip || '—'}</td>
                   )}
-                  <td className={`px-4 py-3 text-xs font-medium ${bucketColor(lead.bucket)}`}>
+                  <td className={`px-4 py-3 text-xs font-medium hidden md:table-cell ${bucketColor(lead.bucket)}`}>
                     {lead.bucket || '—'}
                   </td>
                   <td className="px-4 py-3">
@@ -289,10 +289,20 @@ function LeadTable({ leads, reps, expandedId, setExpandedId, assigning, onAssign
   )
 }
 
+// ── State persistence ──────────────────────────────────────────────────────
+
+const LEADS_KEY = 'ploks_leads_state'
+function saveLeadsState(s) {
+  try { sessionStorage.setItem(LEADS_KEY, JSON.stringify(s)) } catch {}
+}
+function loadLeadsState() {
+  try { return JSON.parse(sessionStorage.getItem(LEADS_KEY) || '{}') } catch { return {} }
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────
 
 export default function LeadsPage() {
-  const [activeTab, setActiveTab] = useState('zip') // 'zip' | 'reps'
+  const [activeTab, setActiveTab] = useState(() => loadLeadsState().tab || 'zip')
 
   // Shared
   const [zips, setZips] = useState([])
@@ -302,17 +312,17 @@ export default function LeadsPage() {
   const [loading, setLoading] = useState(false)
   const [loadingMeta, setLoadingMeta] = useState(true)
   const [error, setError] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-  const [search, setSearch] = useState('')
+  const [filterStatus, setFilterStatus] = useState(() => loadLeadsState().status || '')
+  const [search, setSearch] = useState(() => loadLeadsState().search || '')
   const [expandedId, setExpandedId] = useState(null)
   const [assigning, setAssigning] = useState(null)
 
   // ZIP tab
-  const [selectedZip, setSelectedZip] = useState('')
-  const [filterRep, setFilterRep] = useState('')
+  const [selectedZip, setSelectedZip] = useState(() => loadLeadsState().zip || '')
+  const [filterRep, setFilterRep] = useState(() => loadLeadsState().filterRep || '')
 
   // Reps tab
-  const [selectedRepId, setSelectedRepId] = useState('')
+  const [selectedRepId, setSelectedRepId] = useState(() => loadLeadsState().rep || '')
 
   useEffect(() => {
     async function loadMeta() {
@@ -329,6 +339,17 @@ export default function LeadsPage() {
     }
     loadMeta()
   }, [])
+
+  // On mount: restore leads for the previously selected ZIP or rep
+  useEffect(() => {
+    if (activeTab === 'zip' && selectedZip) loadLeads(selectedZip)
+    else if (activeTab === 'reps' && selectedRepId) loadRepLeads(selectedRepId)
+  }, []) // intentionally empty — runs once on mount to restore session
+
+  // Persist filter state so it survives navigating away and back
+  useEffect(() => {
+    saveLeadsState({ tab: activeTab, zip: selectedZip, rep: selectedRepId, status: filterStatus, filterRep, search })
+  }, [activeTab, selectedZip, selectedRepId, filterStatus, filterRep, search])
 
   // All ZIPs sorted by assigned-lead count desc, then alphabetically
   const zipOptions = useMemo(() =>
@@ -426,9 +447,9 @@ export default function LeadsPage() {
   const hasSelection = activeTab === 'zip' ? !!selectedZip : !!selectedRepId
 
   return (
-    <div className="p-6">
+    <div className="p-3 md:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      <div className="flex items-center justify-between mb-4 md:mb-5">
         <div>
           <h1 className="text-2xl font-bold text-slate-100">Leads</h1>
           {hasSelection && !loading && (

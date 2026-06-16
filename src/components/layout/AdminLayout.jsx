@@ -86,45 +86,78 @@ export default function AdminLayout() {
   if (!authed) return <AdminLoginGate onAuth={() => setAuthed(true)} />
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100">
-      <aside className="w-16 md:w-52 flex flex-col bg-slate-900 border-r border-slate-800 shrink-0">
-        <div className="px-4 py-5 border-b border-slate-800">
-          <span className="hidden md:block text-blue-400 font-bold text-lg tracking-wide">PLOKS</span>
-          <span className="md:hidden text-blue-400 font-bold text-lg">P</span>
-        </div>
-        <nav className="flex-1 py-4 space-y-1 px-2">
+    <div className="flex flex-col h-screen bg-slate-950 text-slate-100">
+      {/* Desktop sidebar + page content */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Sidebar — hidden on mobile, visible md+ */}
+        <aside className="hidden md:flex flex-col w-52 bg-slate-900 border-r border-slate-800 shrink-0">
+          <div className="px-4 py-5 border-b border-slate-800">
+            <span className="text-blue-400 font-bold text-lg tracking-wide">PLOKS</span>
+          </div>
+          <nav className="flex-1 py-4 space-y-1 px-2">
+            {nav.map(({ to, icon: Icon, label }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={to === '/'}
+                className={({ isActive }) =>
+                  `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+                  }`
+                }
+              >
+                <Icon size={18} />
+                <span>{label}</span>
+              </NavLink>
+            ))}
+          </nav>
+          <div className="px-2 pb-3 border-t border-slate-800 pt-3">
+            <button
+              onClick={signOut}
+              className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors w-full"
+            >
+              <LogOut size={18} />
+              <span>Sign out</span>
+            </button>
+            <div className="px-1 pt-2 text-xs text-slate-700">Oak Valley Roofing</div>
+          </div>
+        </aside>
+
+        {/* Page content */}
+        <main className="flex-1 overflow-auto">
+          <Outlet />
+        </main>
+      </div>
+
+      {/* Mobile bottom nav — hidden md+ */}
+      <nav className="md:hidden shrink-0 bg-slate-900 border-t border-slate-800">
+        <div className="flex items-stretch">
           {nav.map(({ to, icon: Icon, label }) => (
             <NavLink
               key={to}
               to={to}
               end={to === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                  isActive
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-400 hover:bg-slate-800 hover:text-slate-100'
+                `flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-[10px] font-medium transition-colors ${
+                  isActive ? 'text-blue-400' : 'text-slate-500'
                 }`
               }
             >
-              <Icon size={18} />
-              <span className="hidden md:block">{label}</span>
+              <Icon size={20} />
+              <span>{label}</span>
             </NavLink>
           ))}
-        </nav>
-        <div className="px-2 pb-3 border-t border-slate-800 pt-3">
           <button
             onClick={signOut}
-            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-slate-500 hover:bg-slate-800 hover:text-slate-300 transition-colors w-full"
+            className="flex-1 flex flex-col items-center justify-center py-2 gap-0.5 text-[10px] font-medium text-slate-500 hover:text-slate-300 transition-colors"
           >
-            <LogOut size={18} />
-            <span className="hidden md:block">Sign out</span>
+            <LogOut size={20} />
+            <span>Out</span>
           </button>
-          <div className="px-1 pt-2 text-xs text-slate-700 hidden md:block">Oak Valley Roofing</div>
         </div>
-      </aside>
-      <main className="flex-1 overflow-auto">
-        <Outlet />
-      </main>
+      </nav>
     </div>
   )
 }
