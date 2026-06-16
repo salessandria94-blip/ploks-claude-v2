@@ -622,7 +622,7 @@ export default function RepsPage() {
 
       {!loading && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {reps.map(rep => (
+          {reps.filter(r => r.id !== 'ADMIN-001').map(rep => (
             <RepCard
               key={rep.id}
               rep={rep}
