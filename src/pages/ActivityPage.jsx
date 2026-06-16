@@ -1,8 +1,28 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getAllReps, getActivityPage } from '../api/sheets.js'
-import { RefreshCw, Loader2, ChevronDown } from 'lucide-react'
+import { getAllReps, getActivityPage, getLeadById, updateLeadProfile } from '../api/sheets.js'
+import { RefreshCw, Loader2, ChevronDown, X, ClipboardList } from 'lucide-react'
 
 // ── Constants ─────────────────────────────────────────────────────────────────
+
+const STATUSES = ['No Contact', 'Contacted', 'Working', 'Follow Up', 'Closed']
+
+function statusBadge(s) {
+  const lc = (s || '').toLowerCase()
+  if (lc === 'no contact') return 'bg-green-900/70 text-green-300'
+  if (lc === 'contacted')  return 'bg-amber-900/70 text-amber-300'
+  if (lc === 'working')    return 'bg-purple-900/70 text-purple-300'
+  if (lc === 'follow up')  return 'bg-red-900/70 text-red-300'
+  if (lc === 'closed')     return 'bg-slate-700 text-slate-400'
+  return 'bg-slate-700 text-slate-300'
+}
+
+function bucketColor(b) {
+  const u = (b || '').toUpperCase()
+  if (u === 'ACTIVE') return 'text-green-400'
+  if (u === 'WARM')   return 'text-yellow-400'
+  if (u === 'COLD')   return 'text-blue-400'
+  return 'text-slate-500'
+}
 
 const ACTION_LABEL = {
   claim:          'Claimed',
@@ -111,10 +131,223 @@ function ActionBadge({ action }) {
   )
 }
 
+// ── Lead detail drawer ────────────────────────────────────────────────────────
+
+function DrawerField({ label, value, onChange, placeholder }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label className="text-xs text-slate-500 uppercase tracking-wide">{label}</label>
+      <input
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder || ''}
+        className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 placeholder:text-slate-600"
+      />
+    </div>
+  )
+}
+
+function LeadDetailDrawer({ leadId, onClose }) {
+  const [lead, setLead] = useState(null)
+  const [activity, setActivity] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [form, setForm] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [showLog, setShowLog] = useState(false)
+
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      try {
+        const res = await getLeadById(leadId)
+        setLead(res.lead)
+        setActivity(res.activity || [])
+        if (res.lead) {
+          setForm({
+            owner_name: res.lead.owner_name || '',
+            phone:      res.lead.phone || '',
+            email:      res.lead.email || '',
+            insurance:  res.lead.insurance || '',
+            status:     res.lead.status || '',
+            notes:      res.lead.notes || '',
+          })
+        }
+      } catch (err) {
+        console.error('LeadDetailDrawer load failed:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [leadId])
+
+  async function handleSave() {
+    if (!lead || !form) return
+    setSaving(true)
+    const fields = {}
+    if (form.owner_name !== (lead.owner_name || '')) fields.owner_name = form.owner_name
+    if (form.phone      !== (lead.phone      || '')) fields.phone      = form.phone
+    if (form.email      !== (lead.email      || '')) fields.email      = form.email
+    if (form.insurance  !== (lead.insurance  || '')) fields.insurance  = form.insurance
+    if (form.status     !== (lead.status     || '')) fields.status     = form.status
+    if (form.notes      !== (lead.notes      || '')) fields.notes      = form.notes
+    if (Object.keys(fields).length === 0) { setSaving(false); return }
+    try {
+      await updateLeadProfile(lead.id, fields, 'admin')
+      setLead(prev => ({ ...prev, ...fields }))
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2500)
+    } catch (err) {
+      alert('Save failed: ' + err.message)
+    } finally { setSaving(false) }
+  }
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 bg-black/60 z-40" onClick={onClose} />
+
+      {/* Drawer */}
+      <div className="fixed right-0 top-0 bottom-0 w-full max-w-md bg-slate-900 border-l border-slate-800 shadow-2xl z-50 flex flex-col">
+        {/* Header */}
+        <div className="flex items-start justify-between px-4 py-4 border-b border-slate-800 shrink-0">
+          <div className="flex-1 min-w-0 pr-3">
+            {lead ? (
+              <>
+                <div className="text-slate-100 font-semibold text-base leading-tight truncate">{lead.address}</div>
+                <div className="text-slate-500 text-xs mt-0.5">
+                  ZIP {lead.zip}{lead.assigned_rep ? ` · ${lead.assigned_rep}` : ' · Unassigned'}
+                </div>
+              </>
+            ) : loading ? (
+              <div className="text-slate-400 text-sm">Loading…</div>
+            ) : (
+              <div className="text-slate-400 text-sm">Lead not found</div>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 text-slate-500 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors shrink-0"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex-1 flex items-center justify-center text-slate-500 text-sm gap-2">
+            <Loader2 size={16} className="animate-spin" /> Loading lead…
+          </div>
+        ) : lead && form ? (
+          <div className="flex-1 overflow-auto px-4 py-4 space-y-3">
+            {/* Status + bucket chips */}
+            <div className="flex items-center gap-2 flex-wrap">
+              {form.status && (
+                <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${statusBadge(form.status)}`}>
+                  {form.status}
+                </span>
+              )}
+              {lead.bucket && (
+                <span className={`text-xs font-medium ${bucketColor(lead.bucket)}`}>{lead.bucket}</span>
+              )}
+              {lead.roof_age && <span className="text-xs text-slate-500">Roof: {lead.roof_age}</span>}
+            </div>
+
+            {/* Editable fields */}
+            <DrawerField label="Owner Name" value={form.owner_name}
+              onChange={v => setForm(f => ({ ...f, owner_name: v }))} />
+            <div className="grid grid-cols-2 gap-3">
+              <DrawerField label="Phone" value={form.phone}
+                onChange={v => setForm(f => ({ ...f, phone: v }))} placeholder="(000) 000-0000" />
+              <DrawerField label="Email" value={form.email}
+                onChange={v => setForm(f => ({ ...f, email: v }))} placeholder="email@domain.com" />
+            </div>
+            <DrawerField label="Insurance" value={form.insurance}
+              onChange={v => setForm(f => ({ ...f, insurance: v }))} placeholder="State Farm, Allstate…" />
+
+            {/* Status dropdown */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-slate-500 uppercase tracking-wide">Lead Status</label>
+              <select
+                value={form.status}
+                onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
+                className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500"
+              >
+                <option value="">— No Status —</option>
+                {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+
+            {/* Notes */}
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-slate-500 uppercase tracking-wide">Notes</label>
+              <textarea
+                value={form.notes}
+                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                rows={3}
+                placeholder="Notes…"
+                className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 focus:outline-none focus:border-blue-500 resize-none placeholder:text-slate-600"
+              />
+            </div>
+
+            {/* Save */}
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm px-4 py-2 rounded-lg font-medium transition-colors"
+            >
+              {saving ? 'Saving…' : saved ? 'Saved ✓' : 'Save Changes'}
+            </button>
+
+            {/* Activity log */}
+            <div className="pt-1">
+              <button
+                onClick={() => setShowLog(v => !v)}
+                className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg transition-colors ${
+                  showLog
+                    ? 'bg-slate-700 text-slate-200'
+                    : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <ClipboardList size={14} />
+                {showLog ? 'Hide log' : 'Show log'}
+              </button>
+              {showLog && (
+                <div className="mt-2 bg-slate-800 rounded-lg p-3">
+                  {activity.length === 0 ? (
+                    <div className="text-slate-600 text-xs">No activity recorded.</div>
+                  ) : (
+                    <div className="flex flex-col gap-2.5 max-h-64 overflow-auto">
+                      {activity.map((e, i) => (
+                        <div key={i} className="flex gap-2 text-xs">
+                          <div className="text-slate-600 whitespace-nowrap shrink-0">
+                            {e.ts ? new Date(e.ts).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—'}
+                          </div>
+                          <div className="text-slate-400 shrink-0 w-16">{ACTION_LABEL[e.action] || e.action}</div>
+                          <div className="text-slate-300 truncate">{e.notes || e.status || '—'}</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center text-slate-500 text-sm">
+            Could not load lead.
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
+
 // ── Activity row ──────────────────────────────────────────────────────────────
 
-function ActivityRow({ entry, repMap }) {
+function ActivityRow({ entry, repMap, onLeadClick }) {
   const repName  = repMap[entry.rep_id] || (entry.rep_id ? entry.rep_id : 'System')
+  const clickable = !!entry.lead_id && !entry._grouped
 
   // Grouped / bulk row
   if (entry._grouped) {
@@ -150,7 +383,14 @@ function ActivityRow({ entry, repMap }) {
   }
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3 border-b border-slate-800/60 hover:bg-slate-800/20 transition-colors">
+    <div
+      onClick={clickable ? () => onLeadClick(entry.lead_id) : undefined}
+      className={`flex items-start gap-3 px-4 py-3 border-b border-slate-800/60 transition-colors ${
+        clickable
+          ? 'cursor-pointer hover:bg-slate-800/40 active:bg-slate-700/40'
+          : 'hover:bg-slate-800/20'
+      }`}
+    >
       <div className="shrink-0 pt-0.5"><ActionBadge action={entry.action} /></div>
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
@@ -182,6 +422,7 @@ export default function ActivityPage() {
   const [error, setError]           = useState('')
   const [repFilter, setRepFilter]   = useState('')   // rep_id or '' for all
   const [actionFilter, setActionFilter] = useState('all') // filter group id
+  const [selectedLeadId, setSelectedLeadId] = useState(null)
 
   const activeGroup = FILTERS.find(f => f.id === actionFilter) || FILTERS[0]
 
@@ -318,7 +559,12 @@ export default function ActivityPage() {
         )}
 
         {collapseEntries(entries).map((entry, i) => (
-          <ActivityRow key={entry._grouped ? `grp-${i}` : entry.id} entry={entry} repMap={repMap} />
+          <ActivityRow
+            key={entry._grouped ? `grp-${i}` : entry.id}
+            entry={entry}
+            repMap={repMap}
+            onLeadClick={setSelectedLeadId}
+          />
         ))}
 
         {/* Load more */}
@@ -343,6 +589,11 @@ export default function ActivityPage() {
           </div>
         )}
       </div>
+
+      {/* Lead detail drawer */}
+      {selectedLeadId && (
+        <LeadDetailDrawer leadId={selectedLeadId} onClose={() => setSelectedLeadId(null)} />
+      )}
     </div>
   )
 }
