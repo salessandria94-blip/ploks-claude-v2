@@ -108,8 +108,8 @@ function RepLogin({ lockedSlug, onUnlock }) {
 
   async function submit(nextPin) {
     if (!slug) { setError('Pick your name first'); setPin(''); return }
-    // Admin shortcut — PIN 4321 navigates to admin dashboard
-    if (slug === '__admin__') {
+    // Admin shortcut — navigates to admin dashboard
+    if (slug === 'admin' || slug === '__admin__') {
       if (nextPin === '4321') { navigate('/') }
       else { setError('Wrong PIN'); setPin('') }
       return
@@ -145,8 +145,6 @@ function RepLogin({ lockedSlug, onUnlock }) {
         >
           <option value="">Select your name…</option>
           {reps.map(r => <option key={r.id} value={r.slug}>{r.name}</option>)}
-          <option disabled>──────────────</option>
-          <option value="__admin__">Admin</option>
         </select>
       )}
       {lockedSlug && <div className="text-slate-300 text-sm">Welcome, {lockedSlug}</div>}
