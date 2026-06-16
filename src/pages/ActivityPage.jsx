@@ -35,13 +35,47 @@ const ACTION_STYLE = {
 
 // Filter groups shown at top
 const FILTERS = [
-  { id: 'all',      label: 'All',      actions: null },
+  { id: 'all',      label: 'Recent',   actions: null },
   { id: 'claims',   label: 'Claims',   actions: ['claim', 'bulk_claim'] },
   { id: 'assigned', label: 'Assigned', actions: ['admin_assign'] },
   { id: 'releases', label: 'Releases', actions: ['unassign', 'bulk_unassign', 'admin_unassign'] },
   { id: 'status',   label: 'Status',   actions: ['status_update'] },
   { id: 'notes',    label: 'Notes',    actions: ['note', 'edit'] },
 ]
+
+// Collapse consecutive claim/assign entries from the same rep in the same ZIP
+// within a 5-minute window into a single summary row.
+const COLLAPSIBLE = new Set(['claim', 'bulk_claim', 'admin_assign'])
+const COLLAPSE_WINDOW_MS = 5 * 60 * 1000
+
+function collapseEntries(entries) {
+  const result = []
+  const used = new Set()
+  for (let i = 0; i < entries.length; i++) {
+    if (used.has(i)) continue
+    const e = entries[i]
+    used.add(i)
+    if (!COLLAPSIBLE.has(e.action)) { result.push(e); continue }
+    const zip = e.leads?.zip
+    const baseTime = new Date(e.ts).getTime()
+    const group = [e]
+    for (let j = i + 1; j < entries.length; j++) {
+      if (used.has(j)) continue
+      const ej = entries[j]
+      if (!COLLAPSIBLE.has(ej.action)) continue
+      if (ej.rep_id !== e.rep_id || ej.leads?.zip !== zip) continue
+      if (Math.abs(new Date(ej.ts).getTime() - baseTime) > COLLAPSE_WINDOW_MS) continue
+      group.push(ej)
+      used.add(j)
+    }
+    if (group.length > 1) {
+      result.push({ ...e, _grouped: true, _count: group.length, _zip: zip })
+    } else {
+      result.push(e)
+    }
+  }
+  return result
+}
 
 // Status badge colours that match the app's status colour scheme
 const STATUS_COLOR = {
@@ -81,12 +115,28 @@ function ActionBadge({ action }) {
 
 function ActivityRow({ entry, repMap }) {
   const repName  = repMap[entry.rep_id] || (entry.rep_id ? entry.rep_id : 'System')
+
+  // Grouped / bulk row
+  if (entry._grouped) {
+    return (
+      <div className="flex items-center gap-3 px-4 py-3 border-b border-slate-800/60 hover:bg-slate-800/20 transition-colors">
+        <div className="shrink-0"><ActionBadge action={entry.action} /></div>
+        <div className="flex-1 min-w-0 flex flex-wrap items-baseline gap-x-2">
+          <span className="text-slate-200 text-sm font-medium">{repName}</span>
+          <span className="text-slate-400 text-xs">
+            {entry._count} leads{entry._zip ? ` · ${entry._zip}` : ''}
+          </span>
+        </div>
+        <div className="shrink-0 text-slate-600 text-xs whitespace-nowrap">{timeAgo(entry.ts)}</div>
+      </div>
+    )
+  }
+
   const address  = entry.leads?.address
   const zip      = entry.leads?.zip
   const statusLc = (entry.status || '').toLowerCase()
   const statusCls = STATUS_COLOR[statusLc] || 'text-slate-300'
 
-  // Build the secondary detail line
   let detail = null
   if (entry.action === 'status_update' && entry.status) {
     detail = (
@@ -101,12 +151,7 @@ function ActivityRow({ entry, repMap }) {
 
   return (
     <div className="flex items-start gap-3 px-4 py-3 border-b border-slate-800/60 hover:bg-slate-800/20 transition-colors">
-      {/* Left — action badge */}
-      <div className="shrink-0 pt-0.5">
-        <ActionBadge action={entry.action} />
-      </div>
-
-      {/* Center — who + where */}
+      <div className="shrink-0 pt-0.5"><ActionBadge action={entry.action} /></div>
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="text-slate-200 text-sm font-medium">{repName}</span>
@@ -119,11 +164,7 @@ function ActivityRow({ entry, repMap }) {
         </div>
         {detail && <div className="text-xs mt-0.5">{detail}</div>}
       </div>
-
-      {/* Right — time */}
-      <div className="shrink-0 text-slate-600 text-xs whitespace-nowrap pt-0.5">
-        {timeAgo(entry.ts)}
-      </div>
+      <div className="shrink-0 text-slate-600 text-xs whitespace-nowrap pt-0.5">{timeAgo(entry.ts)}</div>
     </div>
   )
 }
@@ -276,8 +317,8 @@ export default function ActivityPage() {
           </div>
         )}
 
-        {entries.map(entry => (
-          <ActivityRow key={entry.id} entry={entry} repMap={repMap} />
+        {collapseEntries(entries).map((entry, i) => (
+          <ActivityRow key={entry._grouped ? `grp-${i}` : entry.id} entry={entry} repMap={repMap} />
         ))}
 
         {/* Load more */}

@@ -95,7 +95,10 @@ function statusBadgeClass(s) {
 
 function RepLogin({ lockedSlug, onUnlock }) {
   const [reps, setReps] = useState([])
-  const [slug, setSlug] = useState(lockedSlug || '')
+  const [slug, setSlug] = useState(() => {
+    if (lockedSlug) return lockedSlug
+    try { return localStorage.getItem('ploks_last_slug') || '' } catch { return '' }
+  })
   const [pin, setPin] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
@@ -1651,8 +1654,13 @@ export default function RepWorkspace() {
     try { localStorage.setItem(STORE_KEY, JSON.stringify(r)) } catch { /* noop */ }
   }
   function logout() {
+    const slug = rep?.slug
     setRep(null)
-    try { localStorage.removeItem(STORE_KEY) } catch { /* noop */ }
+    try {
+      localStorage.removeItem(STORE_KEY)
+      // Keep the slug so the dropdown is pre-selected on next login
+      if (slug && slug !== 'admin') localStorage.setItem('ploks_last_slug', slug)
+    } catch {}
   }
 
   if (!rep) return <RepLogin lockedSlug={repSlug || ''} onUnlock={unlock} />
