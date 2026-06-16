@@ -1600,6 +1600,7 @@ const TABS = [
 
 export default function RepWorkspace() {
   const { repSlug } = useParams()
+  const navigate = useNavigate()
   const [rep, setRep] = useState(() => {
     try { return JSON.parse(localStorage.getItem(STORE_KEY) || 'null') } catch { return null }
   })
@@ -1644,6 +1645,8 @@ export default function RepWorkspace() {
   function addMyLead(lead) { setMyLeads(prev => (prev.some(l => l.id === lead.id) ? prev : [...prev, lead])) }
 
   function unlock(r) {
+    // Admin always goes to the admin dashboard, not the field workspace
+    if (r.slug === 'admin') { navigate('/'); return }
     setRep(r)
     try { localStorage.setItem(STORE_KEY, JSON.stringify(r)) } catch { /* noop */ }
   }
