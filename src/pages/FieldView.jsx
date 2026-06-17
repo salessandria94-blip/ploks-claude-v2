@@ -328,8 +328,11 @@ export default function FieldView() {
           </MapContainer>
 
           {/* Address search overlay */}
-          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] w-64">
-            <AddressSearch onResult={setFlyTarget} />
+          <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000]">
+            <AddressSearch
+              onResult={setFlyTarget}
+              {...(rep?.id === 'REP-005' ? { active: !!flyTarget, onClear: () => setFlyTarget(null) } : {})}
+            />
           </div>
 
           <div className="absolute top-3 left-3 z-[999] bg-slate-900/90 rounded-lg px-3 py-2 text-xs text-slate-300 space-y-1 pointer-events-none">

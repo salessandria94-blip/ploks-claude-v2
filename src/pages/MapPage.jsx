@@ -844,7 +844,12 @@ export default function MapPage() {
           <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
         </div>
 
-        <AddressSearch onResult={setFlyTarget} compact />
+        <AddressSearch
+          onResult={setFlyTarget}
+          onClear={() => setFlyTarget(null)}
+          active={!!flyTarget}
+          compact
+        />
 
         {loading && <Loader2 size={16} className="animate-spin text-blue-400 shrink-0" />}
 

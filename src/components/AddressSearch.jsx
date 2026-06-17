@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { Search, Loader2 } from 'lucide-react'
+import { Search, Loader2, X } from 'lucide-react'
 
 // Geocodes an address using Nominatim (OpenStreetMap) — no API key required.
 // Calls onResult([lat, lng]) on success, onError(msg) on failure.
-export default function AddressSearch({ onResult, onError, compact = false }) {
+// Pass active=true + onClear to toggle the button from 🔍 to ✕ when a pin is dropped.
+export default function AddressSearch({ onResult, onError, onClear, active = false, compact = false }) {
   const [query,   setQuery]   = useState('')
-  const [loading, setLoading] = useState('')
+  const [loading, setLoading] = useState(false)
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -28,6 +29,13 @@ export default function AddressSearch({ onResult, onError, compact = false }) {
     }
   }
 
+  function handleClear() {
+    setQuery('')
+    onClear?.()
+  }
+
+  const showClear = active && onClear
+
   return (
     <form onSubmit={handleSubmit} className="flex items-center gap-1">
       <input
@@ -39,16 +47,27 @@ export default function AddressSearch({ onResult, onError, compact = false }) {
           compact ? 'px-2.5 py-1 w-48' : 'px-3 py-1.5 w-64'
         }`}
       />
-      <button
-        type="submit"
-        disabled={!!loading || !query.trim()}
-        className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 disabled:opacity-40 transition-colors"
-        title="Go to address"
-      >
-        {loading
-          ? <Loader2 size={14} className="animate-spin" />
-          : <Search size={14} />}
-      </button>
+      {showClear ? (
+        <button
+          type="button"
+          onClick={handleClear}
+          title="Clear pin"
+          className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-red-400 hover:text-red-300 hover:border-slate-500 transition-colors"
+        >
+          <X size={14} />
+        </button>
+      ) : (
+        <button
+          type="submit"
+          disabled={!!loading || !query.trim()}
+          title="Go to address"
+          className="p-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500 disabled:opacity-40 transition-colors"
+        >
+          {loading
+            ? <Loader2 size={14} className="animate-spin" />
+            : <Search size={14} />}
+        </button>
+      )}
     </form>
   )
 }
