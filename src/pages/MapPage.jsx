@@ -4,6 +4,7 @@ import L from 'leaflet'
 import {
   getAllReps, assignLead, unassignLead, updateLeadProfile, getLeadActivity,
   getAllAssignedLeads, getRepLocations, getZipList, getLeadsNearPin, getLeadsInBounds,
+  getUnassignedLeadsByZip,
 } from '../api/sheets.js'
 import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, LocateFixed } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
@@ -571,7 +572,7 @@ export default function MapPage() {
   const [allLeads, setAllLeads]     = useState([])   // all assigned leads, lat/lng filtered
   const [repFilter, setRepFilter]   = useState(null) // null = All Reps
   const [zipFilter, setZipFilter]   = useState('')   // '' = all ZIPs
-  const [statusFilter, setStatusFilter] = useState(() => new Set(ALL_STATUSES))
+  const [statusFilter, setStatusFilter] = useState(() => new Set(ALL_STATUSES.filter(s => s !== 'unassigned')))
   const [loading, setLoading]       = useState(true)
   const [repLocations, setRepLocations] = useState([]) // live rep GPS dots
   const [repFlyTarget, setRepFlyTarget] = useState(null) // snap map to live rep
@@ -586,9 +587,12 @@ export default function MapPage() {
   const [error, setError]           = useState('')
   const [flyTarget, setFlyTarget]   = useState(null)
   // Geo-search (lasso reveal)
-  const [geoLeads, setGeoLeads]     = useState([])
-  const [geoAnchor, setGeoAnchor]   = useState(null)
-  const [geoLoading, setGeoLoading] = useState(false)
+  const [geoLeads, setGeoLeads]         = useState([])
+  const [geoAnchor, setGeoAnchor]       = useState(null)
+  const [geoLoading, setGeoLoading]     = useState(false)
+  // Unassigned leads for selected ZIP (loaded when Unassigned filter is checked + ZIP selected)
+  const [zipUnassignedLeads, setZipUnassignedLeads]     = useState([])
+  const [zipUnassignedLoading, setZipUnassignedLoading] = useState(false)
   // Own GPS
   const [myLocation, setMyLocation] = useState(null)
   const [gpsActive, setGpsActive]   = useState(false)
@@ -666,6 +670,22 @@ export default function MapPage() {
 
   function clearGeo() { setGeoLeads([]); setGeoAnchor(null); setSelectedLeads([]) }
 
+  // Fetch unassigned leads for a ZIP when that filter combo is active
+  const isUnassignedChecked = statusFilter.has('unassigned')
+  useEffect(() => {
+    if (!zipFilter || !isUnassignedChecked) {
+      setZipUnassignedLeads([])
+      return
+    }
+    let cancelled = false
+    setZipUnassignedLoading(true)
+    getUnassignedLeadsByZip(zipFilter)
+      .then(res => { if (!cancelled) setZipUnassignedLeads(res.leads || []) })
+      .catch(() => { if (!cancelled) setZipUnassignedLeads([]) })
+      .finally(() => { if (!cancelled) setZipUnassignedLoading(false) })
+    return () => { cancelled = true }
+  }, [zipFilter, isUnassignedChecked])
+
   // Displayed leads = rep filter + zip filter + status filter, all client-side
   const filteredLeads = useMemo(() => {
     let out = allLeads
@@ -677,14 +697,15 @@ export default function MapPage() {
     return out
   }, [allLeads, repFilter, zipFilter, statusFilter])
 
-  // Merge assigned (filtered) leads with geo-search revealed leads
+  // Merge assigned (filtered) leads with geo/zip unassigned leads — dedupe by id
   const filteredIds = useMemo(() => new Set(filteredLeads.map(l => l.id)), [filteredLeads])
-  const displayLeads = useMemo(() => [
-    ...filteredLeads,
-    ...(statusFilter.has('unassigned')
-      ? geoLeads.filter(l => !filteredIds.has(l.id) && l.lat && l.lng)
-      : []),
-  ], [filteredLeads, geoLeads, filteredIds, statusFilter])
+  const displayLeads = useMemo(() => {
+    if (!statusFilter.has('unassigned')) return filteredLeads
+    const unassignedMap = new Map()
+    geoLeads.forEach(l => { if (l.lat && l.lng && !filteredIds.has(l.id)) unassignedMap.set(l.id, l) })
+    zipUnassignedLeads.forEach(l => { if (l.lat && l.lng && !filteredIds.has(l.id)) unassignedMap.set(l.id, l) })
+    return [...filteredLeads, ...unassignedMap.values()]
+  }, [filteredLeads, geoLeads, zipUnassignedLeads, filteredIds, statusFilter])
 
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
 
@@ -851,12 +872,14 @@ export default function MapPage() {
           compact
         />
 
-        {loading && <Loader2 size={16} className="animate-spin text-blue-400 shrink-0" />}
+        {(loading || zipUnassignedLoading) && <Loader2 size={16} className="animate-spin text-blue-400 shrink-0" />}
 
-        {!loading && (
+        {!loading && !zipUnassignedLoading && (
           <span className="text-slate-500 text-xs shrink-0">
             {filteredLeads.length} assigned
-            {geoLeads.filter(l => !filteredIds.has(l.id)).length > 0 &&
+            {zipUnassignedLeads.length > 0 && isUnassignedChecked &&
+              <span className="text-sky-400"> · {zipUnassignedLeads.length} unassigned</span>}
+            {!zipFilter && geoLeads.filter(l => !filteredIds.has(l.id)).length > 0 &&
               <span className="text-sky-400"> +{geoLeads.filter(l => !filteredIds.has(l.id)).length} revealed</span>}
             {repFilter && <span className="text-blue-400"> · {repFilter.name}</span>}
             {zipFilter  && <span className="text-slate-600"> · ZIP {zipFilter}</span>}
