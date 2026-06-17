@@ -13,9 +13,26 @@ import {
   createAppointment, getAppointmentsForRep, deleteAppointment, pingRepLocation,
 } from '../api/sheets.js'
 import AdminDashboard from './Dashboard.jsx'
+import AddressSearch from '../components/AddressSearch.jsx'
 import { LayoutDashboard, Map as MapIcon, List, FileText, Calendar, LogOut, X, Navigation, Lasso, Target, Loader2, ClipboardList, RefreshCw, LocateFixed, Menu, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
 
 const STATUSES = ['No Contact', 'Contacted', 'Working', 'Closed']
+
+const SEARCH_PIN_ICON = L.divIcon({
+  className: '',
+  html: `<svg width="28" height="40" viewBox="0 0 28 40" xmlns="http://www.w3.org/2000/svg">
+    <path d="M14 0C6.3 0 0 6.3 0 14c0 10.5 14 26 14 26S28 24.5 28 14C28 6.3 21.7 0 14 0z" fill="#ef4444" stroke="white" stroke-width="1.5"/>
+    <circle cx="14" cy="14" r="5" fill="white"/>
+  </svg>`,
+  iconSize:   [28, 40],
+  iconAnchor: [14, 40],
+})
+
+function FlyToLocation({ coords }) {
+  const map = useMap()
+  useEffect(() => { if (coords) map.flyTo(coords, 17) }, [coords, map])
+  return null
+}
 const STORE_KEY = 'ploks_rep_v2'
 const ACTION_LABELS = {
   admin_assign: 'Assigned', admin_unassign: 'Unassigned', status_update: 'Status changed',
@@ -217,6 +234,8 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   const watchRef = useRef(null)
   const snappedRef = useRef(false)
   const lastPingRef = useRef(0)   // timestamp of last successful location ping
+  // Address search pin (SA-gated for now)
+  const [flyTarget, setFlyTarget] = useState(null)
 
   // ── Stephen-only test gate (remove gate when rolling to all reps) ───────────
   const isStephen = rep?.name === 'Stephen Alessandria'
@@ -452,11 +471,19 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
         <select
           value={selectedZip}
           onChange={e => loadZip(e.target.value)}
-          className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 flex-1 focus:outline-none focus:border-blue-500"
+          className="bg-slate-800 border border-slate-700 text-slate-100 text-sm rounded-lg px-3 py-2 flex-1 min-w-0 focus:outline-none focus:border-blue-500"
         >
           <option value="">Select a ZIP…</option>
           {zips.map(z => <option key={z} value={z}>{z}{countByZip[z] ? ` (${countByZip[z]})` : ''}</option>)}
         </select>
+        {isStephen && (
+          <AddressSearch
+            onResult={setFlyTarget}
+            active={!!flyTarget}
+            onClear={() => setFlyTarget(null)}
+            compact
+          />
+        )}
         {loading && <Loader2 size={16} className="animate-spin text-blue-400" />}
         {selectedZip && !loading && (
           <span className="text-xs text-slate-400 whitespace-nowrap">
@@ -480,6 +507,8 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
       <div className="relative flex-1 min-h-0 bg-[#020617]">
         <MapContainer ref={mapRef} center={JACKSONVILLE_CENTER} zoom={12} style={{ height: '100%', width: '100%', background: '#020617' }} zoomControl={false}>
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
+          {isStephen && <FlyToLocation coords={flyTarget} />}
+          {isStephen && flyTarget && <Marker position={flyTarget} icon={SEARCH_PIN_ICON} />}
           <FitBounds leads={geoLeads} />
           <CenterOnLead lead={selectedLead} />
           <MapResizer active={active} />
