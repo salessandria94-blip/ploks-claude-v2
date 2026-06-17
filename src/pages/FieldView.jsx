@@ -331,7 +331,8 @@ export default function FieldView() {
           <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000]">
             <AddressSearch
               onResult={setFlyTarget}
-              {...(rep?.id === 'REP-005' ? { active: !!flyTarget, onClear: () => setFlyTarget(null) } : {})}
+              active={!!flyTarget}
+              onClear={() => setFlyTarget(null)}
             />
           </div>
 
