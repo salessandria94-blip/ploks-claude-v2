@@ -354,8 +354,19 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
           <button onClick={onClose} className="text-slate-500 hover:text-slate-300 p-1"><X size={18} /></button>
         </div>
 
-        <div className="mb-3 max-w-xs">
-          <AssignDropdown lead={lead} reps={reps} busy={busy} onAssign={onAssign} onUnassign={onUnassign} />
+        <div className="mb-3 flex items-center gap-2">
+          <div className="flex-1 min-w-0">
+            <AssignDropdown lead={lead} reps={reps} busy={busy} onAssign={onAssign} onUnassign={onUnassign} />
+          </div>
+          <a
+            href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent((lead.address || '') + ', Jacksonville, FL ' + (lead.zip || ''))}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 text-sm font-medium transition-colors shrink-0"
+          >
+            <Navigation size={14} />
+            <span>Nav</span>
+          </a>
         </div>
 
         <div className="flex flex-wrap gap-1.5 mb-3">
