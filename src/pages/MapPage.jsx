@@ -6,7 +6,7 @@ import {
   getAllAssignedLeads, getRepLocations, getZipList, getLeadsNearPin, getLeadsInBounds,
   getUnassignedLeadsByZip,
 } from '../api/sheets.js'
-import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, LocateFixed, RefreshCw, Layers } from 'lucide-react'
+import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, LocateFixed, RefreshCw } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
 
 const SATELLITE_TILE = {
@@ -14,10 +14,6 @@ const SATELLITE_TILE = {
   attribution: '© ESRI',
 }
 
-const LIGHT_TILE = {
-  url: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-  attribution: '© OpenStreetMap contributors © CARTO',
-}
 const JACKSONVILLE_CENTER = [30.3322, -81.6557]
 
 // ── Lead pin colors by status ─────────────────────────────────────────────────
@@ -602,7 +598,6 @@ export default function MapPage() {
   const [allZips, setAllZips]       = useState([])
   const [error, setError]           = useState('')
   const [flyTarget, setFlyTarget]   = useState(null)
-  const [mapTile, setMapTile]       = useState('satellite')
   // Geo-search (lasso reveal)
   const [geoLeads, setGeoLeads]         = useState([])
   const [geoAnchor, setGeoAnchor]       = useState(null)
@@ -914,11 +909,7 @@ export default function MapPage() {
           style={{ height: '100%', width: '100%' }}
           zoomControl={false}
         >
-          <TileLayer
-            key={mapTile}
-            url={mapTile === 'satellite' ? SATELLITE_TILE.url : LIGHT_TILE.url}
-            attribution={mapTile === 'satellite' ? SATELLITE_TILE.attribution : LIGHT_TILE.attribution}
-          />
+          <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
           <FlyToLocation coords={flyTarget} />
           <FlyToRepLocation target={repFlyTarget} />
           {flyTarget && <Marker position={flyTarget} icon={SEARCH_PIN_ICON} />}
@@ -1008,13 +999,6 @@ export default function MapPage() {
 
         {/* Tools (top-right) */}
         <div className="absolute top-3 right-3 z-[999] flex flex-col gap-2">
-          <button
-            onClick={() => setMapTile(t => t === 'satellite' ? 'light' : 'satellite')}
-            title={mapTile === 'satellite' ? 'Switch to street map' : 'Switch to satellite'}
-            className={`p-2 rounded-lg border shadow-lg transition-colors ${mapTile === 'light' ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}>
-            <Layers size={16} />
-          </button>
-          <div className="border-t border-slate-700/50 my-0.5" />
           <button onClick={() => setTool(t => (t === 'lasso' ? null : 'lasso'))} title="Lasso reveal"
             className={`p-2 rounded-lg border shadow-lg transition-colors ${tool === 'lasso' ? 'bg-sky-500 border-sky-400 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}>
             <Lasso size={16} />
