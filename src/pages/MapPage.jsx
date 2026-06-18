@@ -6,7 +6,7 @@ import {
   getAllAssignedLeads, getRepLocations, getZipList, getLeadsNearPin, getLeadsInBounds,
   getUnassignedLeadsByZip,
 } from '../api/sheets.js'
-import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, LocateFixed } from 'lucide-react'
+import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, LocateFixed, RefreshCw } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
 
 const SATELLITE_TILE = {
@@ -463,7 +463,7 @@ const ALL_STATUSES = ['no contact', 'contacted', 'working', 'follow up', 'closed
 function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations, statusFilter, onStatusToggle }) {
   const ref = useRef(null)
   const activeRepIds = new Set((repLocations || []).map(l => l.rep_id))
-  const allStatusesOn = statusFilter.size === ALL_STATUSES.length
+  const allStatusesOn = ALL_STATUSES.filter(s => s !== 'unassigned').every(s => statusFilter.has(s))
 
   useEffect(() => {
     if (!open) return
@@ -609,21 +609,24 @@ export default function MapPage() {
   const [gpsActive, setGpsActive]   = useState(false)
   const gpsWatchRef = useRef(null)
 
-  // On mount: load reps + all assigned leads + full ZIP list in parallel
-  useEffect(() => {
-    async function init() {
-      try {
-        const [repRes, leadRes, zipRes] = await Promise.all([getAllReps(), getAllAssignedLeads(), getZipList()])
-        setReps(repRes.reps || [])
-        setAllLeads((leadRes.leads || []).filter(l => l.lat && l.lng))
-        setAllZips(zipRes.zips || [])
-      } catch (err) {
-        setError('Failed to load map data: ' + err.message)
-      } finally {
-        setLoading(false)
-      }
+  // Load reps + all assigned leads + full ZIP list — callable for refresh
+  const refresh = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const [repRes, leadRes, zipRes] = await Promise.all([getAllReps(), getAllAssignedLeads(), getZipList()])
+      setReps(repRes.reps || [])
+      setAllLeads((leadRes.leads || []).filter(l => l.lat && l.lng))
+      setAllZips(zipRes.zips || [])
+    } catch (err) {
+      setError('Failed to load map data: ' + err.message)
+    } finally {
+      setLoading(false)
     }
-    init()
+  }, [])
+
+  useEffect(() => {
+    refresh()
   }, [])
 
   // Poll rep GPS locations every 60 seconds (dots auto-hide after 5 min stale)
@@ -854,11 +857,20 @@ export default function MapPage() {
         .rep-stat-popup .leaflet-popup-close-button:hover { color: #94a3b8 !important; }
       `}</style>
       {/* ── Top bar ─────────────────────────────────────────────────────────── */}
-      <div className="px-4 py-3 border-b border-slate-800 bg-slate-900 shrink-0 flex flex-wrap items-center gap-3">
+      <div className="px-4 py-3 border-b border-slate-800 bg-slate-900 shrink-0 flex items-center gap-2">
         <h1 className="text-xl font-bold text-slate-100 shrink-0">Map</h1>
 
-        {/* ZIP dropdown — all ZIPs, sorted by activity desc */}
-        <div className="relative min-w-40">
+        <button
+          onClick={refresh}
+          disabled={loading}
+          title="Refresh leads"
+          className="p-1.5 rounded-lg text-slate-400 hover:text-slate-200 disabled:opacity-40 transition-colors shrink-0"
+        >
+          <RefreshCw size={16} className={loading ? 'animate-spin text-blue-400' : ''} />
+        </button>
+
+        {/* ZIP dropdown */}
+        <div className="relative flex-1 min-w-0">
           <select
             value={zipFilter}
             onChange={e => { setZipFilter(e.target.value); setSelectedLead(null); setSelectedLeads([]) }}
@@ -882,20 +894,6 @@ export default function MapPage() {
           active={!!flyTarget}
           compact
         />
-
-        {(loading || zipUnassignedLoading) && <Loader2 size={16} className="animate-spin text-blue-400 shrink-0" />}
-
-        {!loading && !zipUnassignedLoading && (
-          <span className="text-slate-500 text-xs shrink-0">
-            {filteredLeads.length} assigned
-            {zipUnassignedLeads.length > 0 && isUnassignedChecked &&
-              <span className="text-sky-400"> · {zipUnassignedLeads.length} unassigned</span>}
-            {!zipFilter && geoLeads.filter(l => !filteredIds.has(l.id)).length > 0 &&
-              <span className="text-sky-400"> +{geoLeads.filter(l => !filteredIds.has(l.id)).length} revealed</span>}
-            {repFilter && <span className="text-blue-400"> · {repFilter.name}</span>}
-            {zipFilter  && <span className="text-slate-600"> · ZIP {zipFilter}</span>}
-          </span>
-        )}
       </div>
 
       {error && (
