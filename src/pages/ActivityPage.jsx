@@ -353,7 +353,7 @@ function LeadDetailDrawer({ leadId, onClose }) {
 // ── Activity row ──────────────────────────────────────────────────────────────
 
 function ActivityRow({ entry, repMap, onLeadClick }) {
-  const repName  = repMap[entry.rep_id] || (entry.rep_id ? entry.rep_id : 'System')
+  const repName  = repMap[entry.rep_id] || (entry.rep_id ? entry.rep_id : 'Admin')
   const clickable = !!entry.lead_id && !entry._grouped
 
   // Grouped / bulk row
