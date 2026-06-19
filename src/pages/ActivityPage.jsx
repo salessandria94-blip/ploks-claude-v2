@@ -63,10 +63,12 @@ const FILTERS = [
   { id: 'notes',    label: 'Notes',    actions: ['note', 'edit'] },
 ]
 
-// Collapse consecutive claim/assign entries from the same rep in the same ZIP
-// within a 5-minute window into a single summary row.
-const COLLAPSIBLE = new Set(['claim', 'bulk_claim', 'admin_assign'])
-const COLLAPSE_WINDOW_MS = 5 * 60 * 1000
+// Collapse consecutive claim/assign/release entries from the same source in the same ZIP.
+// Rep actions: 5-minute window (tight burst when a rep bulk-claims).
+// System actions (no rep_id): 24-hour window — system batch jobs can span longer.
+const COLLAPSIBLE = new Set(['claim', 'bulk_claim', 'admin_assign', 'unassign', 'bulk_unassign', 'admin_unassign'])
+const COLLAPSE_WINDOW_MS        = 5  * 60 * 1000        // 5 min for rep actions
+const SYSTEM_COLLAPSE_WINDOW_MS = 24 * 60 * 60 * 1000  // 24 h  for system actions
 
 function collapseEntries(entries) {
   const result = []
@@ -76,15 +78,20 @@ function collapseEntries(entries) {
     const e = entries[i]
     used.add(i)
     if (!COLLAPSIBLE.has(e.action)) { result.push(e); continue }
-    const zip = e.leads?.zip
+    const zip      = e.leads?.zip
+    const repKey   = e.rep_id || ''          // normalise null/undefined → ''
+    const isSystem = !e.rep_id
     const baseTime = new Date(e.ts).getTime()
+    const windowMs = isSystem ? SYSTEM_COLLAPSE_WINDOW_MS : COLLAPSE_WINDOW_MS
     const group = [e]
     for (let j = i + 1; j < entries.length; j++) {
       if (used.has(j)) continue
       const ej = entries[j]
       if (!COLLAPSIBLE.has(ej.action)) continue
-      if (ej.rep_id !== e.rep_id || ej.leads?.zip !== zip) continue
-      if (Math.abs(new Date(ej.ts).getTime() - baseTime) > COLLAPSE_WINDOW_MS) continue
+      if ((ej.rep_id || '') !== repKey) continue           // same source
+      if (ej.leads?.zip !== zip) continue                  // same ZIP
+      if (isSystem && ej.action !== e.action) continue     // system: don't mix release/assign
+      if (Math.abs(new Date(ej.ts).getTime() - baseTime) > windowMs) continue
       group.push(ej)
       used.add(j)
     }
