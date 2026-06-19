@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { useOutletContext } from 'react-router-dom'
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap, useMapEvents } from 'react-leaflet'
 import L from 'leaflet'
 import {
@@ -291,7 +292,7 @@ function PanelInput({ label, value, onChange, placeholder }) {
   )
 }
 
-function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLeadUpdate }) {
+function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLeadUpdate, role }) {
   const [form, setForm] = useState({
     owner_name: lead.owner_name || '', phone: lead.phone || '',
     email: lead.email || '', insurance: lead.insurance || '', notes: lead.notes || '',
@@ -359,15 +360,17 @@ function SingleLeadPanel({ lead, reps, busy, onAssign, onUnassign, onClose, onLe
           <div className="flex-1 min-w-0">
             <AssignDropdown lead={lead} reps={reps} busy={busy} onAssign={onAssign} onUnassign={onUnassign} />
           </div>
-          <a
-            href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent((lead.address || '') + ', Jacksonville, FL ' + (lead.zip || ''))}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 text-sm font-medium transition-colors shrink-0"
-          >
-            <Navigation size={14} />
-            <span>Nav</span>
-          </a>
+          {role === 'manager' && (
+            <a
+              href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent((lead.address || '') + ', Jacksonville, FL ' + (lead.zip || ''))}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 hover:text-white hover:bg-slate-700 text-sm font-medium transition-colors shrink-0"
+            >
+              <Navigation size={14} />
+              <span>Nav</span>
+            </a>
+          )}
         </div>
 
         <div className="flex flex-wrap gap-1.5 mb-3">
@@ -580,6 +583,7 @@ function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations, stat
 // ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function MapPage() {
+  const { role } = useOutletContext() || {}
   const [reps, setReps]             = useState([])
   const [allLeads, setAllLeads]     = useState([])   // all assigned leads, lat/lng filtered
   const [repFilter, setRepFilter]   = useState(null) // null = All Reps
@@ -1061,6 +1065,7 @@ export default function MapPage() {
           onUnassign={handleUnassign}
           onClose={clearSelection}
           onLeadUpdate={patchLead}
+          role={role}
         />
       )}
       {!selectedLead && selectedLeads.length > 0 && (

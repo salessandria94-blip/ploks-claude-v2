@@ -2,8 +2,11 @@ import { useState } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import { LayoutDashboard, Map, Users, List, Activity, LogOut } from 'lucide-react'
 
-const ADMIN_PIN = '4321'
-const ADMIN_SESSION_KEY = 'ploks_admin_auth'
+// 4321 → Manager (bosses / Andrew / Alex)
+// 9556 → Admin   (Stephen only — will gate PLOKS.ai here)
+const MANAGER_PIN = '4321'
+const ADMIN_PIN   = '9556'
+const SESSION_KEY = 'ploks_admin_auth'
 
 const nav = [
   { to: '/', icon: LayoutDashboard, label: 'Dashboard' },
@@ -13,7 +16,7 @@ const nav = [
   { to: '/activity', icon: Activity, label: 'Activity' },
 ]
 
-// ── Admin PIN gate ─────────────────────────────────────────────────────────────
+// ── PIN gate ───────────────────────────────────────────────────────────────────
 
 function AdminLoginGate({ onAuth }) {
   const [pin, setPin] = useState('')
@@ -25,9 +28,12 @@ function AdminLoginGate({ onAuth }) {
     const next = pin + k
     setPin(next)
     if (next.length === 4) {
-      if (next === ADMIN_PIN) {
-        try { localStorage.setItem(ADMIN_SESSION_KEY, 'true') } catch {}
-        onAuth()
+      if (next === MANAGER_PIN) {
+        try { localStorage.setItem(SESSION_KEY, JSON.stringify({ role: 'manager' })) } catch {}
+        onAuth('manager')
+      } else if (next === ADMIN_PIN) {
+        try { localStorage.setItem(SESSION_KEY, JSON.stringify({ role: 'admin' })) } catch {}
+        onAuth('admin')
       } else {
         setError('Wrong PIN')
         setPin('')
@@ -38,7 +44,7 @@ function AdminLoginGate({ onAuth }) {
   return (
     <div className="fixed inset-0 bg-slate-950 flex flex-col items-center justify-center gap-5 p-6">
       <div className="text-blue-400 font-bold text-2xl tracking-wide">PLOKS</div>
-      <div className="text-slate-500 text-sm">Admin access</div>
+      <div className="text-slate-500 text-sm">Enter PIN</div>
 
       <div className="flex gap-3">
         {[0, 1, 2, 3].map(i => (
@@ -74,16 +80,19 @@ function AdminLoginGate({ onAuth }) {
 // ── Layout ─────────────────────────────────────────────────────────────────────
 
 export default function AdminLayout() {
-  const [authed, setAuthed] = useState(() => {
-    try { return localStorage.getItem(ADMIN_SESSION_KEY) === 'true' } catch { return false }
+  const [role, setRole] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}')
+      return stored.role || null
+    } catch { return null }
   })
 
   function signOut() {
-    try { localStorage.removeItem(ADMIN_SESSION_KEY) } catch {}
-    setAuthed(false)
+    try { localStorage.removeItem(SESSION_KEY) } catch {}
+    setRole(null)
   }
 
-  if (!authed) return <AdminLoginGate onAuth={() => setAuthed(true)} />
+  if (!role) return <AdminLoginGate onAuth={r => setRole(r)} />
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100">
@@ -125,9 +134,9 @@ export default function AdminLayout() {
           </div>
         </aside>
 
-        {/* Page content */}
+        {/* Page content — role passed via outlet context to all admin pages */}
         <main className="flex-1 overflow-auto">
-          <Outlet />
+          <Outlet context={{ role }} />
         </main>
       </div>
 
