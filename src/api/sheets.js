@@ -222,6 +222,22 @@ export async function getRepLocations() {
   return { locations: (data || []).filter(l => new Date(l.updated_at).getTime() > cutoff) }
 }
 
+// 0.5 mile proximity reveal — bounding box approx (no PostGIS needed)
+export async function getUnassignedLeadsNearPoint(lat, lng) {
+  const D_LAT = 0.0072  // ~0.5 mile north/south
+  const D_LNG = 0.009   // ~0.5 mile east/west
+  const { data, error } = await supabase
+    .from('leads')
+    .select('id, address, zip, lat, lng, bucket, roof_age, status')
+    .is('assigned_rep_id', null)
+    .not('lat', 'is', null)
+    .gte('lat', lat - D_LAT).lte('lat', lat + D_LAT)
+    .gte('lng', lng - D_LNG).lte('lng', lng + D_LNG)
+    .limit(300)
+  if (error) throw new Error(error.message)
+  return { leads: data || [] }
+}
+
 export async function getUnassignedLeadsByZip(zip) {
   const PAGE = 1000
   let all = []

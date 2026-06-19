@@ -11,6 +11,7 @@ import {
   updateLeadStatus, updateLeadProfile, getLeadActivity, assignLead,
   claimLeadsBulk, unassignLeadsBulk, getLeadsNearPin, getLeadsInBounds,
   createAppointment, getAppointmentsForRep, deleteAppointment, pingRepLocation,
+  getUnassignedLeadsNearPoint,
 } from '../api/sheets.js'
 import AdminDashboard from './Dashboard.jsx'
 import AddressSearch from '../components/AddressSearch.jsx'
@@ -244,8 +245,11 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   // Address search pin (SA-gated for now)
   const [flyTarget, setFlyTarget] = useState(null)
 
-  // ── Stephen-only test gate (remove gate when rolling to all reps) ───────────
-  const isStephen = rep?.name === 'Stephen Alessandria'
+  // ── Tester gate (remove gate when rolling to all reps) ──────────────────────
+  const isTester = rep?.slug === 'tester'
+
+  const [nearbyLeads, setNearbyLeads] = useState([])
+  const [showNearby, setShowNearby]   = useState(false)
 
   useEffect(() => { getZipList().then(r => setZips(r.zips || [])).catch(() => {}) }, [])
   useEffect(() => { getAllReps().then(r => setReps(r.reps || [])).catch(() => {}) }, [])
@@ -290,6 +294,16 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
   }, [repPos])
   useEffect(() => () => { if (watchRef.current != null) navigator.geolocation.clearWatch(watchRef.current) }, [])
 
+  // Proximity lead reveal: fetch unassigned leads within 0.5 mi when Tester + showNearby
+  useEffect(() => {
+    if (!repPos || !showNearby || !isTester) { setNearbyLeads([]); return }
+    let cancelled = false
+    getUnassignedLeadsNearPoint(repPos[0], repPos[1])
+      .then(res => { if (!cancelled) setNearbyLeads(res.leads || []) })
+      .catch(() => { if (!cancelled) setNearbyLeads([]) })
+    return () => { cancelled = true }
+  }, [repPos, showNearby, isTester])
+
   const selectedIds = useMemo(() => new Set(selectedLeads.map(l => l.id)), [selectedLeads])
   const geoLeads = useMemo(() => leads.filter(l => l.lat && l.lng), [leads])
 
@@ -305,8 +319,14 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
     }
     // Open layer: geo-search results (drawn area, no ZIP) OR loaded ZIP leads
     if (geoLeadsSearch.length > 0 || geoLoading) return geoLeadsSearch.filter(l => l.lat && l.lng)
+    // Merge nearby leads (Tester proximity reveal) — dedupe by id
+    if (nearbyLeads.length > 0) {
+      const seen = new Set(geoLeads.map(l => l.id))
+      const extras = nearbyLeads.filter(l => l.lat && l.lng && !seen.has(l.id))
+      return [...geoLeads, ...extras]
+    }
     return geoLeads
-  }, [mapLayer, myLeads, geoLeads, geoLeadsSearch, geoLoading])
+  }, [mapLayer, myLeads, geoLeads, geoLeadsSearch, geoLoading, nearbyLeads])
 
   const panelOpen = !!selectedLead && selectedLeads.length === 0
   // How many of the rep's own leads are in each ZIP (for the dropdown labels).
@@ -483,7 +503,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
           <option value="">Select a ZIP…</option>
           {zips.map(z => <option key={z} value={z}>{z}{countByZip[z] ? ` (${countByZip[z]})` : ''}</option>)}
         </select>
-        {isStephen && (
+        {isTester && (
           <AddressSearch
             onResult={setFlyTarget}
             active={!!flyTarget}
@@ -497,7 +517,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
             <span className="text-blue-400">{openCount}</span>/<span className="text-green-400">{mineCount}</span>
           </span>
         )}
-        {isStephen && selectedZip && !loading && (
+        {isTester && selectedZip && !loading && (
           <button
             onClick={refreshLeads}
             title="Refresh leads"
@@ -514,8 +534,8 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
       <div className="relative flex-1 min-h-0 bg-[#020617]">
         <MapContainer ref={mapRef} center={JACKSONVILLE_CENTER} zoom={12} style={{ height: '100%', width: '100%', background: '#020617' }} zoomControl={false}>
           <TileLayer url={SATELLITE_TILE.url} attribution={SATELLITE_TILE.attribution} />
-          {isStephen && <FlyToLocation coords={flyTarget} />}
-          {isStephen && flyTarget && <Marker position={flyTarget} icon={SEARCH_PIN_ICON} />}
+          {isTester && <FlyToLocation coords={flyTarget} />}
+          {isTester && flyTarget && <Marker position={flyTarget} icon={SEARCH_PIN_ICON} />}
           <FitBounds leads={geoLeads} />
           <CenterOnLead lead={selectedLead} />
           <MapResizer active={active} />
@@ -524,6 +544,10 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
           {geoAnchor && (
             <Circle center={[geoAnchor.lat, geoAnchor.lng]} radius={geoAnchor.radiusM}
               pathOptions={{ color: '#7c3aed', weight: 1.5, fillColor: '#7c3aed', fillOpacity: 0.06 }} />
+          )}
+          {repPos && showNearby && isTester && (
+            <Circle center={repPos} radius={804}
+              pathOptions={{ color: '#0ea5e9', weight: 1.5, fillColor: '#0ea5e9', fillOpacity: 0.04, dashArray: '6 4' }} />
           )}
           {repPos && <Marker position={repPos} icon={repLocationIcon} zIndexOffset={2000} />}
           {displayLeads.map(lead => {
@@ -578,6 +602,15 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
             title={repPos ? 'Center on me' : 'Find my location'}
             className={`p-2 rounded-lg border shadow-lg ${repPos ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300'}`}
           ><LocateFixed size={16} /></button>
+          {isTester && repPos && (
+            <button
+              onClick={() => setShowNearby(v => !v)}
+              title={showNearby ? 'Hide nearby leads' : 'Show nearby unassigned leads'}
+              className={`px-2.5 py-2 rounded-lg border shadow-lg text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                showNearby ? 'bg-sky-600 border-sky-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300'
+              }`}
+            >Near</button>
+          )}
           {(geoLeadsSearch.length > 0 || geoLoading) && (
             <button onClick={clearGeoSearch} title="Clear search"
               className="p-2 rounded-lg border shadow-lg bg-purple-700 border-purple-500 text-white">
@@ -595,7 +628,7 @@ function RepMap({ rep, active, myLeads, onMineAdd, onMineRemove, onMinePatch }) 
             )}
             {!geoLoading && !geoErr && geoLeadsSearch.length > 0 && (() => {
               const openGeo = geoLeadsSearch.filter(l => relationOf(l, rep.id) === 'open')
-              const mineGeo = isStephen ? geoLeadsSearch.filter(l => relationOf(l, rep.id) === 'mine') : []
+              const mineGeo = isTester ? geoLeadsSearch.filter(l => relationOf(l, rep.id) === 'mine') : []
               return (
                 <div className="pointer-events-auto flex gap-2">
                   {openGeo.length > 0 && (
