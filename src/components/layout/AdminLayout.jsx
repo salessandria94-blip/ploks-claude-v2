@@ -2,9 +2,7 @@ import { useState } from 'react'
 import { Outlet, NavLink } from 'react-router-dom'
 import { LayoutDashboard, Map, Users, List, Activity, LogOut } from 'lucide-react'
 
-// 4321 → Manager (bosses / Andrew / Alex)
-// 9556 → Admin   (Stephen only — will gate PLOKS.ai here)
-const MANAGER_PIN = '4321'
+// Admin only — Stephen. PLOKS.ai and other admin-only features gate here.
 const ADMIN_PIN   = '9556'
 const SESSION_KEY = 'ploks_admin_auth'
 
@@ -28,10 +26,7 @@ function AdminLoginGate({ onAuth }) {
     const next = pin + k
     setPin(next)
     if (next.length === 4) {
-      if (next === MANAGER_PIN) {
-        try { localStorage.setItem(SESSION_KEY, JSON.stringify({ role: 'manager' })) } catch {}
-        onAuth('manager')
-      } else if (next === ADMIN_PIN) {
+      if (next === ADMIN_PIN) {
         try { localStorage.setItem(SESSION_KEY, JSON.stringify({ role: 'admin' })) } catch {}
         onAuth('admin')
       } else {
@@ -80,19 +75,19 @@ function AdminLoginGate({ onAuth }) {
 // ── Layout ─────────────────────────────────────────────────────────────────────
 
 export default function AdminLayout() {
-  const [role, setRole] = useState(() => {
+  const [authed, setAuthed] = useState(() => {
     try {
       const stored = JSON.parse(localStorage.getItem(SESSION_KEY) || '{}')
-      return stored.role || null
-    } catch { return null }
+      return stored.role === 'admin'
+    } catch { return false }
   })
 
   function signOut() {
     try { localStorage.removeItem(SESSION_KEY) } catch {}
-    setRole(null)
+    setAuthed(false)
   }
 
-  if (!role) return <AdminLoginGate onAuth={r => setRole(r)} />
+  if (!authed) return <AdminLoginGate onAuth={() => setAuthed(true)} />
 
   return (
     <div className="flex flex-col h-screen bg-slate-950 text-slate-100">
@@ -136,7 +131,7 @@ export default function AdminLayout() {
 
         {/* Page content — role passed via outlet context to all admin pages */}
         <main className="flex-1 overflow-auto">
-          <Outlet context={{ role }} />
+          <Outlet context={{ role: 'admin' }} />
         </main>
       </div>
 

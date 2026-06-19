@@ -128,17 +128,24 @@ function RepLogin({ lockedSlug, onUnlock }) {
 
   async function submit(nextPin) {
     if (!slug) { setError('Pick your name first'); setPin(''); return }
-    // Admin shortcut — navigates to admin dashboard
+    // Admin shortcut — navigates to admin dashboard (Stephen only)
     if (slug === 'admin' || slug === '__admin__') {
-      if (nextPin === '4321') { navigate('/') }
+      if (nextPin === '9556') { navigate('/') }
       else { setError('Wrong PIN'); setPin('') }
       return
     }
     setLoading(true)
     try {
       const res = await validatePin(slug, nextPin)
-      if (res.ok) onUnlock(res.rep)
-      else { setError('Wrong PIN'); setPin('') }
+      if (res.ok) {
+        if (res.rep.is_manager) {
+          // Manager reps (Andrew, Alex) — store session and go to manager view
+          try { localStorage.setItem('ploks_manager_auth', JSON.stringify({ rep: res.rep })) } catch {}
+          navigate('/manager')
+        } else {
+          onUnlock(res.rep)
+        }
+      } else { setError('Wrong PIN'); setPin('') }
     } catch (e) {
       setError(e.message || 'Connection error'); setPin('')
     } finally { setLoading(false) }
@@ -164,7 +171,7 @@ function RepLogin({ lockedSlug, onUnlock }) {
           className="bg-slate-800 border border-slate-700 text-slate-100 text-base rounded-xl px-4 py-3 w-64 focus:outline-none focus:border-blue-500"
         >
           <option value="">Select your name…</option>
-          {reps.map(r => <option key={r.id} value={r.slug}>{r.name}</option>)}
+          {reps.filter(r => r.slug !== 'admin').map(r => <option key={r.id} value={r.slug}>{r.name}</option>)}
         </select>
       )}
       {lockedSlug && <div className="text-slate-300 text-sm">Welcome, {lockedSlug}</div>}
