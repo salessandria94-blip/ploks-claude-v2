@@ -366,6 +366,36 @@ function RepLeadModal({ rep, statusLabel, dbStatus, onClose }) {
   )
 }
 
+// ── Admin Card ────────────────────────────────────────────────────────────────
+
+function AdminCard() {
+  return (
+    <div className="bg-slate-900 border border-slate-700 rounded-xl p-5 flex flex-col gap-3">
+      {/* Name + badge */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="text-slate-100 font-semibold text-base">Admin</div>
+        <a
+          href="/"
+          className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-full bg-purple-900/40 hover:bg-purple-800/60 text-purple-400 text-xs font-medium transition-colors"
+        >
+          Admin View <ExternalLink size={10} />
+        </a>
+      </div>
+
+      {/* Divider row */}
+      <div className="py-3 border-t border-b border-slate-800 text-center text-slate-600 text-xs tracking-wide">
+        System administrator — all access
+      </div>
+
+      {/* PIN placeholder */}
+      <div className="flex items-center gap-1.5">
+        <span className="text-slate-600 text-xs">PIN</span>
+        <span className="font-mono text-xs text-slate-500">••••</span>
+      </div>
+    </div>
+  )
+}
+
 // ── Add Rep Card (dashed +) ───────────────────────────────────────────────────
 
 function AddRepCard({ onClick }) {
@@ -622,14 +652,16 @@ export default function RepsPage() {
 
       {!loading && (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {reps.filter(r => r.id !== 'ADMIN-001').map(rep => (
-            <RepCard
-              key={rep.id}
-              rep={rep}
-              onEdit={setEditing}
-              onDelete={handleDelete}
-              onDrill={(rep, statusLabel, dbStatus) => setDrilling({ rep, statusLabel, dbStatus })}
-            />
+          {reps.filter(r => r.id !== 'REP-005').map(rep => (
+            rep.id === 'ADMIN-001'
+              ? <AdminCard key={rep.id} />
+              : <RepCard
+                  key={rep.id}
+                  rep={rep}
+                  onEdit={setEditing}
+                  onDelete={handleDelete}
+                  onDrill={(rep, statusLabel, dbStatus) => setDrilling({ rep, statusLabel, dbStatus })}
+                />
           ))}
           <AddRepCard onClick={() => setEditing('new')} />
         </div>

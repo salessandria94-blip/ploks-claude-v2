@@ -171,7 +171,7 @@ function RepLogin({ lockedSlug, onUnlock }) {
           className="bg-slate-800 border border-slate-700 text-slate-100 text-base rounded-xl px-4 py-3 w-64 focus:outline-none focus:border-blue-500"
         >
           <option value="">Select your name…</option>
-          {reps.filter(r => r.slug !== 'admin').map(r => <option key={r.id} value={r.slug}>{r.name}</option>)}
+          {reps.map(r => <option key={r.id} value={r.slug}>{r.name}</option>)}
         </select>
       )}
       {lockedSlug && <div className="text-slate-300 text-sm">Welcome, {lockedSlug}</div>}
