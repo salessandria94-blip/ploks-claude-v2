@@ -166,13 +166,23 @@ export async function getAdminLeadsForZip(zip) {
 }
 
 export async function getAdminZipStats() {
-  const { data, error } = await supabase
-    .from('leads')
-    .select('zip')
-    .not('assigned_rep_id', 'is', null)
-  if (error) throw new Error(error.message)
+  // Must paginate — Supabase caps un-ranged queries at 1000 rows and we have
+  // 1400+ assigned leads, so a single fetch gives wrong per-ZIP counts.
+  const PAGE = 1000
+  let all = [], from = 0
+  while (true) {
+    const { data, error } = await supabase
+      .from('leads')
+      .select('zip')
+      .not('assigned_rep_id', 'is', null)
+      .range(from, from + PAGE - 1)
+    if (error) throw new Error(error.message)
+    all = all.concat(data || [])
+    if (!data || data.length < PAGE) break
+    from += PAGE
+  }
   const counts = {}
-  ;(data || []).forEach(r => { counts[r.zip] = (counts[r.zip] || 0) + 1 })
+  all.forEach(r => { counts[r.zip] = (counts[r.zip] || 0) + 1 })
   return { counts }
 }
 
