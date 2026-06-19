@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import { RefreshCw, ChevronDown, ChevronUp, Calendar, Navigation } from 'lucide-react'
 import { getDashboardStats, getRecentActivity, getAppointmentsForAdmin, getRepLocations } from '../api/sheets.js'
 
-const CAP = 500
-
 // ── Universal PLOKS color system ───────────────────────────────────────────────
 const PLOKS_COLORS = {
   no_contact: '#22c55e',
@@ -122,14 +120,14 @@ function RepCard({ rep, isOnline }) {
         </div>
       </div>
 
-      {/* Apple-style segmented bar against CAP */}
+      {/* Segmented bar — proportional to rep's own total, no cap */}
       <div>
         <div className="flex justify-between text-xs mb-1.5">
-          <span className="text-slate-400">{total.toLocaleString()} / {CAP}</span>
+          <span className="text-slate-400">{total.toLocaleString()} leads</span>
         </div>
         <div className="flex h-2.5 rounded-full overflow-hidden bg-slate-800 w-full">
           {REP_SEGMENTS.map(s => {
-            const pct = CAP > 0 ? ((rep[s.key] || 0) / CAP) * 100 : 0
+            const pct = total > 0 ? ((rep[s.key] || 0) / total) * 100 : 0
             if (pct <= 0) return null
             return (
               <div

@@ -7,7 +7,7 @@ import {
   getAllAssignedLeads, getRepLocations, getZipList, getLeadsNearPin, getLeadsInBounds,
   getUnassignedLeadsByZip,
 } from '../api/sheets.js'
-import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, LocateFixed, RefreshCw } from 'lucide-react'
+import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, RefreshCw } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
 
 const SATELLITE_TILE = {
@@ -41,13 +41,6 @@ function pinColor(lead, selected) {
   const key = (lead.status || 'no contact').toLowerCase()
   return STATUS_COLORS[key] || STATUS_COLORS['no contact']
 }
-
-const MY_LOCATION_ICON = L.divIcon({
-  className: '',
-  html: `<div style="width:18px;height:18px;border-radius:50%;background:#2563eb;border:3px solid white;box-shadow:0 0 0 6px rgba(37,99,235,0.25)"></div>`,
-  iconSize: [18, 18],
-  iconAnchor: [9, 9],
-})
 
 function leadIcon(color, selected) {
   const size = selected ? 18 : 14
@@ -609,10 +602,6 @@ export default function MapPage() {
   // Unassigned leads for selected ZIP (loaded when Unassigned filter is checked + ZIP selected)
   const [zipUnassignedLeads, setZipUnassignedLeads]     = useState([])
   const [zipUnassignedLoading, setZipUnassignedLoading] = useState(false)
-  // Own GPS
-  const [myLocation, setMyLocation] = useState(null)
-  const [gpsActive, setGpsActive]   = useState(false)
-  const gpsWatchRef = useRef(null)
 
   // Load reps + all assigned leads + full ZIP list — callable for refresh
   const refresh = useCallback(async () => {
@@ -668,23 +657,6 @@ export default function MapPage() {
       }
       return next
     })
-  }
-
-  // GPS toggle
-  function toggleGPS() {
-    if (gpsActive) {
-      if (gpsWatchRef.current != null) navigator.geolocation.clearWatch(gpsWatchRef.current)
-      gpsWatchRef.current = null
-      setGpsActive(false)
-      setMyLocation(null)
-    } else {
-      setGpsActive(true)
-      gpsWatchRef.current = navigator.geolocation.watchPosition(
-        pos => setMyLocation([pos.coords.latitude, pos.coords.longitude]),
-        () => { setGpsActive(false); setMyLocation(null) },
-        { enableHighAccuracy: true }
-      )
-    }
   }
 
   function clearGeo() { setGeoLeads([]); setGeoAnchor(null); setSelectedLeads([]) }
@@ -928,9 +900,6 @@ export default function MapPage() {
               pathOptions={{ color: '#60a5fa', weight: 1.5, fillColor: '#60a5fa', fillOpacity: 0.06 }} />
           )}
 
-          {/* Own GPS location */}
-          {myLocation && <Marker position={myLocation} icon={MY_LOCATION_ICON} zIndexOffset={3000} />}
-
           {/* Lead pins — colored by status; sky-blue for geo-revealed unassigned */}
           {displayLeads.map(lead => {
             const isSel = selectedIds.has(lead.id) || (selectedLead?.id === lead.id)
@@ -1015,17 +984,6 @@ export default function MapPage() {
             <button onClick={clearGeo} title="Clear revealed leads"
               className="p-2 rounded-lg border shadow-lg bg-sky-700 border-sky-600 text-white">
               <X size={16} />
-            </button>
-          )}
-          <div className="border-t border-slate-700/50 my-0.5" />
-          <button onClick={toggleGPS} title={gpsActive ? 'Stop GPS' : 'Show my location'}
-            className={`p-2 rounded-lg border shadow-lg transition-colors ${gpsActive ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}>
-            <LocateFixed size={16} />
-          </button>
-          {myLocation && (
-            <button onClick={() => setFlyTarget(myLocation)} title="Center on my location"
-              className="p-2 rounded-lg border shadow-lg bg-slate-900/90 border-slate-700 text-blue-400 hover:text-blue-300">
-              <Navigation size={16} />
             </button>
           )}
         </div>
