@@ -581,7 +581,7 @@ export default function MapPage() {
   const [allLeads, setAllLeads]     = useState([])   // all assigned leads, lat/lng filtered
   const [repFilter, setRepFilter]   = useState(null) // null = All Reps
   const [zipFilter, setZipFilter]   = useState('')   // '' = all ZIPs
-  const [statusFilter, setStatusFilter] = useState(() => new Set(ALL_STATUSES.filter(s => s !== 'unassigned')))
+  const [statusFilter, setStatusFilter] = useState(() => new Set(ALL_STATUSES))
   const [loading, setLoading]       = useState(true)
   const [repLocations, setRepLocations] = useState([]) // live rep GPS dots
   const [repFlyTarget, setRepFlyTarget] = useState(null) // snap map to live rep
