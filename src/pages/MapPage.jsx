@@ -7,7 +7,7 @@ import {
   getAllAssignedLeads, getRepLocations, getZipList, getLeadsNearPin, getLeadsInBounds,
   getUnassignedLeadsByZip,
 } from '../api/sheets.js'
-import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, RefreshCw } from 'lucide-react'
+import { ChevronDown, X, MapPin, Loader2, Lasso, Target, Trash2, ClipboardList, Menu, Navigation, RefreshCw, LocateFixed } from 'lucide-react'
 import AddressSearch from '../components/AddressSearch.jsx'
 
 const SATELLITE_TILE = {
@@ -16,6 +16,13 @@ const SATELLITE_TILE = {
 }
 
 const JACKSONVILLE_CENTER = [30.3322, -81.6557]
+
+const MY_LOCATION_ICON = L.divIcon({
+  className: '',
+  html: `<div style="width:16px;height:16px;border-radius:50%;background:#3b82f6;border:3px solid white;box-shadow:0 0 0 2px #3b82f6"></div>`,
+  iconSize: [16, 16],
+  iconAnchor: [8, 8],
+})
 
 // ── Lead pin colors by status ─────────────────────────────────────────────────
 const STATUS_COLORS = {
@@ -577,6 +584,9 @@ function RepMenu({ reps, repFilter, onSelect, open, onToggle, repLocations, stat
 
 export default function MapPage() {
   const { role } = useOutletContext() || {}
+  const mapRef      = useRef(null)
+  const gpsWatchRef = useRef(null)
+  const [myLocation, setMyLocation] = useState(null)
   const [reps, setReps]             = useState([])
   const [allLeads, setAllLeads]     = useState([])   // all assigned leads, lat/lng filtered
   const [repFilter, setRepFilter]   = useState(null) // null = All Reps
@@ -821,6 +831,33 @@ export default function MapPage() {
 
   const panelOpen = !!selectedLead || selectedLeads.length > 0
 
+  function startGps() {
+    if (!navigator.geolocation) return
+    navigator.geolocation.getCurrentPosition(
+      pos => {
+        const latlng = [pos.coords.latitude, pos.coords.longitude]
+        setMyLocation(latlng)
+        if (mapRef.current) mapRef.current.setView(latlng, 15)
+        if (gpsWatchRef.current == null) {
+          gpsWatchRef.current = navigator.geolocation.watchPosition(
+            p => setMyLocation([p.coords.latitude, p.coords.longitude]),
+            () => {},
+            { enableHighAccuracy: true, maximumAge: 5000 }
+          )
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, timeout: 10000 }
+    )
+  }
+  function locateMe() {
+    if (myLocation && mapRef.current) mapRef.current.setView(myLocation, 15)
+    else startGps()
+  }
+  useEffect(() => () => {
+    if (gpsWatchRef.current != null) navigator.geolocation.clearWatch(gpsWatchRef.current)
+  }, [])
+
   return (
     <div className="flex flex-col h-full">
       <style>{`
@@ -880,6 +917,7 @@ export default function MapPage() {
       {/* ── Map ──────────────────────────────────────────────────────────────── */}
       <div className="relative flex-1 min-h-0">
         <MapContainer
+          ref={mapRef}
           center={JACKSONVILLE_CENTER}
           zoom={11}
           style={{ height: '100%', width: '100%' }}
@@ -956,6 +994,9 @@ export default function MapPage() {
               </Marker>
             ) : null
           })}
+          {role === 'manager' && myLocation && (
+            <Marker position={myLocation} icon={MY_LOCATION_ICON} zIndexOffset={3000} />
+          )}
         </MapContainer>
 
         {/* Rep filter menu (top-left) */}
@@ -980,6 +1021,12 @@ export default function MapPage() {
             className={`p-2 rounded-lg border shadow-lg transition-colors ${tool === 'radius' ? 'bg-sky-500 border-sky-400 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}>
             <Target size={16} />
           </button>
+          {role === 'manager' && (
+            <button onClick={locateMe} title={myLocation ? 'Center on my location' : 'Find my location'}
+              className={`p-2 rounded-lg border shadow-lg transition-colors ${myLocation ? 'bg-blue-600 border-blue-500 text-white' : 'bg-slate-900/90 border-slate-700 text-slate-300 hover:text-white'}`}>
+              <LocateFixed size={16} />
+            </button>
+          )}
           {(geoLeads.length > 0 || geoLoading) && (
             <button onClick={clearGeo} title="Clear revealed leads"
               className="p-2 rounded-lg border shadow-lg bg-sky-700 border-sky-600 text-white">
