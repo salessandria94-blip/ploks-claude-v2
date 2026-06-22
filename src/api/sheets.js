@@ -520,14 +520,15 @@ export async function getRecentActivity(limit = 20) {
 
 // Full paginated activity feed with optional rep + action filters.
 // Tries to join leads for address; falls back gracefully if FK not defined.
-export async function getActivityPage({ limit = 60, offset = 0, repId = null, actions = null } = {}) {
+export async function getActivityPage({ limit = 60, offset = 0, repId = null, actions = null, statusValue = null } = {}) {
   let q = supabase
     .from('activity_log')
     .select('id, ts, action, lead_id, rep_id, status, notes, leads(address, zip)')
     .order('ts', { ascending: false })
     .range(offset, offset + limit - 1)
-  if (repId)   q = q.eq('rep_id', repId)
+  if (repId)       q = q.eq('rep_id', repId)
   if (actions && actions.length) q = q.in('action', actions)
+  if (statusValue) q = q.eq('status', statusValue)
   const { data, error } = await q
   if (error) throw new Error(error.message)
   return { entries: data || [], hasMore: (data || []).length === limit }

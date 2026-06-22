@@ -55,12 +55,14 @@ const ACTION_STYLE = {
 
 // Filter groups shown at top
 const FILTERS = [
-  { id: 'all',      label: 'Recent',   actions: null },
-  { id: 'claims',   label: 'Claims',   actions: ['claim', 'bulk_claim'] },
-  { id: 'assigned', label: 'Assigned', actions: ['admin_assign'] },
-  { id: 'releases', label: 'Releases', actions: ['unassign', 'bulk_unassign', 'admin_unassign'] },
-  { id: 'status',   label: 'Status',   actions: ['status_update'] },
-  { id: 'notes',    label: 'Notes',    actions: ['note', 'edit'] },
+  { id: 'all',      label: 'Recent',    actions: null },
+  { id: 'claims',   label: 'Claims',    actions: ['claim', 'bulk_claim'] },
+  { id: 'assigned', label: 'Assigned',  actions: ['admin_assign'] },
+  { id: 'releases', label: 'Releases',  actions: ['unassign', 'bulk_unassign', 'admin_unassign'] },
+  { id: 'recycled', label: 'Recycled',  actions: ['auto_recycle'] },
+  { id: 'followup', label: 'Follow Up', actions: ['status_update'], statusValue: 'follow up' },
+  { id: 'status',   label: 'Status',    actions: ['status_update'] },
+  { id: 'notes',    label: 'Notes',     actions: ['note', 'edit'] },
 ]
 
 // Collapse consecutive claim/assign/release entries from the same source in the same ZIP.
@@ -443,10 +445,11 @@ export default function ActivityPage() {
     setError('')
     try {
       const res = await getActivityPage({
-        limit:   PAGE_SIZE,
-        offset:  isReplace ? 0 : entries.length,
-        repId:   rep || null,
-        actions: group?.actions || null,
+        limit:       PAGE_SIZE,
+        offset:      isReplace ? 0 : entries.length,
+        repId:       rep || null,
+        actions:     group?.actions || null,
+        statusValue: group?.statusValue || null,
       })
       setEntries(prev => isReplace ? res.entries : [...prev, ...res.entries])
       setHasMore(res.hasMore)
